@@ -1,0 +1,2170 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Chef's Quest ♥</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+  }
+  #gameCanvas {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    display: block;
+  }
+  #controls {
+    position: fixed;
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255,107,157,0.4);
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas" width="960" height="576"></canvas>
+<div id="controls">← → ↑ ↓ mover &nbsp;·&nbsp; ESPAÇO / ENTER interagir &nbsp;·&nbsp; M som</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const W = 480, H = 288;
+const SCALE = 2; // resolução interna 2x
+
+function fitCanvas() {
+  const s = Math.min(window.innerWidth / (W * SCALE), window.innerHeight / (H * SCALE));
+  canvas.style.width  = Math.floor(W * SCALE * s) + 'px';
+  canvas.style.height = Math.floor(H * SCALE * s) + 'px';
+}
+window.addEventListener('resize', fitCanvas);
+fitCanvas();
+
+// ─── PIXEL HELPER ────────────────────────────────────────────
+function px(x, y, w, h, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(Math.floor(x), Math.floor(y), w, h);
+}
+
+// ─── INPUT ───────────────────────────────────────────────────
+const keys = {};
+const justPressed = {};
+document.addEventListener('keydown', e => {
+  SFX.unlock();
+  if (e.code === 'KeyM') {
+    SFX.toggleMute();
+    e.preventDefault();
+    return;
+  }
+  if (handleDebugHotkey(e)) return;
+  if (!keys[e.code]) justPressed[e.code] = true;
+  keys[e.code] = true;
+  if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+document.addEventListener('pointerdown', () => SFX.unlock(), { once:false });
+function clearJP() { for (let k in justPressed) delete justPressed[k]; }
+
+// ─── SOUND FX ─────────────────────────────────────────────────────
+const SFX = (() => {
+  let ac = null, muted = false, unlocked = false, lastBlip = 0;
+  let musicGain = null, musicTimer = null, musicStep = 0, musicNextTime = 0;
+  const melody = [
+    392, 494, 523, 494, 440, 392, 330, 392,
+    440, 523, 587, 523, 494, 440, 392, 330,
+  ];
+  const bass = [196, 196, 220, 220, 165, 165, 196, 196];
+  function ensure() {
+    if (!ac) {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return null;
+      ac = new AudioCtx();
+      musicGain = ac.createGain();
+      musicGain.gain.value = 1;
+      musicGain.connect(ac.destination);
+    }
+    return ac;
+  }
+  function unlock() {
+    const ctx = ensure();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') ctx.resume();
+    unlocked = true;
+    startMusic();
+  }
+  function tone(freq, dur=0.08, type='square', vol=0.035, delay=0, dest=null) {
+    if (muted || !unlocked || !ac) return;
+    const now = ac.currentTime + delay;
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, now);
+    gain.gain.setValueAtTime(vol, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+    osc.connect(gain); gain.connect(dest || ac.destination);
+    osc.start(now); osc.stop(now + dur + 0.01);
+  }
+  function musicTone(freq, time, dur, type='triangle', vol=0.018) {
+    if (muted || !unlocked || !ac || !musicGain) return;
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, time);
+    gain.gain.setValueAtTime(0.001, time);
+    gain.gain.exponentialRampToValueAtTime(vol, time + 0.025);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + dur);
+    osc.connect(gain); gain.connect(musicGain);
+    osc.start(time); osc.stop(time + dur + 0.02);
+  }
+  function scheduleMusic() {
+    if (!ac || !unlocked) return;
+    while (musicNextTime < ac.currentTime + 0.8) {
+      const step = musicStep % melody.length;
+      musicTone(melody[step], musicNextTime, 0.22, 'triangle', 0.016);
+      if (step % 2 === 0) musicTone(bass[Math.floor(step/2)%bass.length], musicNextTime, 0.34, 'sine', 0.012);
+      musicStep++;
+      musicNextTime += 0.32;
+    }
+  }
+  function startMusic() {
+    if (!ac || musicTimer) return;
+    musicNextTime = ac.currentTime + 0.08;
+    scheduleMusic();
+    musicTimer = setInterval(scheduleMusic, 180);
+  }
+  function blip(ch='a') {
+    const now = performance.now();
+    if (now - lastBlip < 38) return;
+    lastBlip = now;
+    tone(520 + (ch.charCodeAt(0) % 9) * 28, 0.035, 'square', 0.018);
+  }
+  return {
+    unlock,
+    toggleMute(){
+      muted = !muted;
+      if (musicGain) musicGain.gain.setTargetAtTime(muted ? 0 : 0.035, ac.currentTime, 0.03);
+      if (!muted) {
+        startMusic();
+        tone(520, 0.05, 'triangle', 0.03);
+      }
+      return muted;
+    },
+    blip,
+    confirm(){ tone(660,0.05,'square',0.025); tone(880,0.06,'square',0.018,0.045); },
+    jump(){ tone(330,0.05,'triangle',0.03); tone(520,0.08,'triangle',0.02,0.04); },
+    collect(){ tone(740,0.05,'square',0.03); tone(1040,0.08,'square',0.025,0.05); },
+    error(){ tone(180,0.12,'sawtooth',0.035); tone(120,0.14,'sawtooth',0.03,0.08); },
+    success(){ tone(523,0.07,'triangle',0.03); tone(659,0.07,'triangle',0.03,0.08); tone(784,0.12,'triangle',0.03,0.16); },
+    hit(){ tone(110,0.08,'sawtooth',0.04); tone(90,0.1,'sawtooth',0.03,0.06); },
+    block(){ tone(260,0.05,'square',0.035); tone(420,0.08,'square',0.03,0.04); },
+  };
+})();
+
+// ─── PALETTE ─────────────────────────────────────────────────
+const C = {
+  bg:'#0d0d1a', bg2:'#1a1a2e',
+  pink:'#ff6b9d', pink2:'#ffaacb', pink3:'#ff3377',
+  gold:'#ffd700', yel:'#ffee55',
+  red:'#ff3355', red2:'#cc1133',
+  grn:'#44cc66', grn2:'#228844', grn3:'#1a6633',
+  blu:'#4488ff', teal:'#22aacc', teal2:'#0d7799',
+  sky:'#7ec8e3', sky2:'#c8eaf7',
+  sand:'#f4d47a', sand2:'#c8a84b',
+  skin:'#f0c08a', brown:'#8b5e3c',
+  purp:'#9966cc', purp2:'#6633aa',
+  white:'#ffffff', gray:'#888888', dark:'#222233', black:'#000000',
+};
+
+// ─── FADE ────────────────────────────────────────────────────
+let fadeAlpha = 0, fadingIn = false, fadingOut = false, fadeCB = null;
+function fadeToScene(fn) {
+  fadingOut = true; fadeAlpha = 0;
+  fadeCB = () => { scene = fn(); fadingIn = true; fadingOut = false; fadeAlpha = 1; };
+}
+function updateFade() {
+  if (fadingOut) { fadeAlpha = Math.min(1, fadeAlpha + 0.05); if (fadeAlpha >= 1 && fadeCB) { fadeCB(); fadeCB = null; } }
+  if (fadingIn)  { fadeAlpha = Math.max(0, fadeAlpha - 0.05); if (fadeAlpha <= 0) fadingIn = false; }
+}
+function drawFade() {
+  if (fadeAlpha > 0) { ctx.fillStyle = `rgba(0,0,0,${fadeAlpha})`; ctx.fillRect(0,0,W,H); }
+}
+
+// ─── FLOATING HEARTS ─────────────────────────────────────────
+const fhearts = [];
+function spawnHeart(x, y) {
+  fhearts.push({ x: x ?? Math.random()*W, y: y ?? H+10,
+    vy: 0.5+Math.random()*1.2, vx: (Math.random()-.5)*.6,
+    size: 6+Math.random()*10, alpha: .4+Math.random()*.5 });
+}
+function updateFHearts() {
+  for (let h of fhearts) { h.y -= h.vy; h.x += h.vx; h.alpha -= .003; }
+  for (let i = fhearts.length-1; i >= 0; i--)
+    if (fhearts[i].alpha <= 0 || fhearts[i].y < -20) fhearts.splice(i,1);
+}
+function drawFHearts() {
+  for (let h of fhearts) { ctx.save(); ctx.globalAlpha = h.alpha; drawHeart(h.x, h.y, h.size); ctx.restore(); }
+}
+function drawHeart(x, y, s) {
+  ctx.fillStyle = C.pink;
+  ctx.beginPath();
+  ctx.arc(x+s/4, y, s/4, Math.PI, 0);
+  ctx.arc(x+s*3/4, y, s/4, Math.PI, 0);
+  ctx.lineTo(x+s/2, y+s*.7);
+  ctx.closePath(); ctx.fill();
+}
+
+// ─── DIALOG ──────────────────────────────────────────────────
+let dialog = null;
+function showDialog(lines, onDone) {
+  dialog = { lines, li:0, ci:0, t:0, speed:2, onDone };
+}
+function updateDialog() {
+  if (!dialog) return;
+  dialog.t++;
+  if (dialog.t >= dialog.speed) {
+    dialog.t=0;
+    if (dialog.ci < dialog.lines[dialog.li].length) {
+      const ch = dialog.lines[dialog.li][dialog.ci];
+      dialog.ci++;
+      if (ch && ch.trim()) SFX.blip(ch);
+    }
+  }
+  if (justPressed['Space'] || justPressed['Enter']) {
+    SFX.confirm();
+    if (dialog.ci < dialog.lines[dialog.li].length) {
+      dialog.ci = dialog.lines[dialog.li].length;
+    } else {
+      dialog.li++; dialog.ci = 0;
+      if (dialog.li >= dialog.lines.length) {
+        const cb = dialog.onDone; dialog = null; if (cb) cb();
+      }
+    }
+  }
+}
+function drawDialog() {
+  if (!dialog) return;
+  const bx=16, by=H-82, bw=W-32, bh=68;
+  ctx.fillStyle = 'rgba(8,6,22,0.93)';
+  ctx.fillRect(bx,by,bw,bh);
+  ctx.strokeStyle = C.pink; ctx.lineWidth = 2;
+  ctx.strokeRect(bx,by,bw,bh);
+  drawHeart(bx+5, by+4, 9);
+  drawHeart(bx+bw-14, by+4, 9);
+  ctx.fillStyle = C.white;
+  ctx.font = '11px "Courier New",monospace';
+  const text = dialog.lines[dialog.li].substring(0, dialog.ci);
+  const words = text.split(' ');
+  const dl = ['','',''];
+  let ln = 0, cur = '';
+  for (let w of words) {
+    const t2 = cur+(cur?' ':'')+w;
+    if (ctx.measureText(t2).width > bw-28) { dl[ln++]=cur; if(ln>2) break; cur=w; }
+    else cur=t2;
+  }
+  if (ln<=2) dl[ln]=cur;
+  for (let i=0;i<3;i++) ctx.fillText(dl[i], bx+14, by+18+i*16);
+  if (dialog.ci >= dialog.lines[dialog.li].length) {
+    if (Math.floor(Date.now()/500)%2===0) {
+      ctx.fillStyle=C.pink; ctx.font='10px "Courier New"';
+      ctx.fillText('▼ continua', bx+bw-72, by+bh-6);
+    }
+  }
+}
+
+// ─── SPRITES ─────────────────────────────────────────────────
+function drawChef(x, y, dir=1, frame=0) {
+  const f = Math.floor(frame)%2;
+  ctx.fillStyle='rgba(0,0,0,.25)'; ctx.fillRect(x-8, y+22, 16,4);
+  // body — camiseta branca simples (estilo academia/casual)
+  px(x-5, y+10, 10,12, '#e8e8ee');
+  px(x-3, y+10, 6, 3, '#ccccdd'); // gola
+  // colar (detalhe)
+  px(x-2, y+13, 4, 1, '#c8a84b');
+  // arms (pele morena)
+  px(x-8, y+11+f*2, 3, 8, '#e8b890');
+  px(x+5, y+11+(1-f)*2, 3, 8, '#e8b890');
+  // calça jeans escura
+  px(x-4, y+22, 4, 7, '#223355'); px(x, y+22, 4, 7, '#223355');
+  px(x-5, y+28, 5, 3, '#111e33'); px(x, y+28, 5, 3, '#111e33');
+  // head (pele morena)
+  px(x-6, y+2, 12,10, '#e8b890');
+  // sombra do rosto
+  px(x-6, y+10, 12, 2, '#c89070');
+  // cabelo castanho escuro ondulado
+  px(x-6, y-3, 12, 6, '#2e1a0e');
+  px(x-7, y-1, 3, 5, '#2e1a0e'); px(x+4, y-1, 3, 5, '#2e1a0e');
+  px(x-5, y-5, 10, 3, '#3d2412');
+  // mecha frontal (cabelo levemente bagunçado)
+  px(x-2, y-4, 4, 2, '#3d2412');
+  px(x+1, y-6, 3, 2, '#2e1a0e');
+  // eyes (castanhos escuros)
+  const ex = dir > 0 ? [x-2, x+2] : [x-4, x];
+  px(ex[0],y+5,2,2,'#2a1a0a'); px(ex[1],y+5,2,2,'#2a1a0a');
+  px(ex[0],y+5,1,1,'#fff'); px(ex[1],y+5,1,1,'#fff');
+  // sorriso
+  px(x-3, y+8, 6,1, '#cc5533');
+  px(x-2, y+9, 4,1, '#ffaa88'); // dentes
+}
+
+function drawMrsPuff(x, y, frame=0) {
+  const f=Math.floor(frame)%2;
+  ctx.fillStyle='rgba(0,0,0,.25)'; ctx.fillRect(x-9,y+22,18,4);
+  px(x-6, y+12, 12,12, '#1a1a1a');
+  px(x-8, y+17, 16, 7, '#2a2a2a');
+  px(x-9, y+13+(1-f)*2, 4,6, C.skin); px(x+5, y+13+f*2, 4,6, C.skin);
+  px(x-3, y+24, 3,4, C.skin); px(x, y+24, 3,4, C.skin);
+  px(x-4, y+27, 4,3, '#1a1a1a'); px(x, y+27, 4,3, '#1a1a1a');
+  // head (round)
+  px(x-8, y+2, 16,11, C.skin);
+  ctx.fillStyle='rgba(255,140,140,.45)';
+  ctx.fillRect(x-7,y+7,5,4); ctx.fillRect(x+2,y+7,5,4);
+  // hair verde
+  px(x-8,y-3,16,7,'#22aa44'); px(x-10,y-1,4,5,'#22aa44'); px(x+6,y-1,4,5,'#22aa44');
+  px(x-5,y-6,10,4,'#44cc66');
+  px(x-3,y-8,6,3,'#33bb55');
+  // eyes
+  px(x-4,y+5,2,3,C.black); px(x+2,y+5,2,3,C.black);
+  px(x-4,y+5,1,1,'#fff'); px(x+2,y+5,1,1,'#fff');
+  px(x-2,y+9,4,1,C.red); px(x-3,y+8,1,1,C.red); px(x+2,y+8,1,1,C.red);
+}
+
+function drawBella(x, y, t) {
+  const f=Math.floor(t/8)%2;
+  const dark='#141414', shade='#e8e8e8';
+  ctx.fillStyle='rgba(0,0,0,.2)'; ctx.fillRect(x-15,y+17,30,4);
+  // cauda preta
+  px(x-16,y+2,3,8,dark);
+  px(x-19,y-1,4,4,dark);
+  // corpo lateral compacto
+  px(x-13,y+1,22,13,C.white);
+  px(x-11,y-1,16,3,C.white);
+  px(x-8,y+3,7,8,dark);
+  px(x+2,y+4,5,5,shade);
+  px(x+7,y+0,4,11,C.white);
+  // cabeça olhando para a direita
+  px(x+8,y-10,13,14,C.white);
+  px(x+6,y-8,6,11,dark);     // orelha preta caída
+  px(x+8,y-10,5,6,dark);     // mancha superior
+  px(x+16,y-6,7,7,C.white);  // focinho
+  px(x+20,y-5,4,3,dark);     // nariz
+  px(x+14,y-7,2,3,dark);     // olho
+  px(x+15,y-7,1,1,C.white);
+  px(x+19,y+1,5,2,'#ff9ab0');
+  px(x+20,y+3,3,3,'#ff7799');
+  // patinhas curtas
+  px(x-10,y+12,3,6+f,C.white);
+  px(x-4,y+12,3,6+(1-f),dark);
+  px(x+3,y+12,3,6+f,C.white);
+  px(x+9,y+11,3,7+(1-f),C.white);
+  px(x-11,y+17+f,6,3,shade);
+  px(x-5,y+17+(1-f),6,3,dark);
+  px(x+2,y+17+f,6,3,shade);
+  px(x+8,y+17+(1-f),6,3,shade);
+}
+
+// ─── SCENE MANAGER ───────────────────────────────────────────
+let scene = null;
+
+// ─── LOCATION CARD ───────────────────────────────────────────
+const LOCS = [
+  { name:'Fla Fit Academia',      sub:'Fase 1 — O Encontro',          color:C.red   },
+  { name:'Morro do Rato',         sub:'Fase 2 — A Aproximação',       color:C.grn   },
+  { name:'Cinema',                sub:'Fase 3 — O Primeiro Encontro', color:C.purp  },
+  { name:'Praia de Santa Clara',  sub:'Fase 4 — O Mar de Nós',        color:C.teal  },
+  { name:'Sorvete Calebito',      sub:'Fase 5 — Sabor de Casa',       color:C.pink3 },
+  { name:'O Dia a Dia',           sub:'Fase 6 — A Mais Difícil',      color:'#cc8800'},
+];
+function createLocCard(idx) {
+  let t=0;
+  const loc=LOCS[idx];
+  return {
+    update() { t++; if(t===101) fadeToScene(()=>createGame(idx)); },
+    draw() {
+      px(0,0,W,H,C.bg2);
+      // accent stripes
+      for(let i=0;i<W;i+=12) { ctx.fillStyle=`rgba(255,107,157,${.04+.02*(i%24===0?1:0)})`; ctx.fillRect(i,0,6,H); }
+      px(0,H/2-38,W,76,loc.color);
+      ctx.textAlign='center';
+      ctx.fillStyle=C.white; ctx.font='bold 17px "Courier New"'; ctx.fillText(loc.name,W/2,H/2-8);
+      ctx.fillStyle='rgba(255,255,255,.75)'; ctx.font='11px "Courier New"'; ctx.fillText(loc.sub,W/2,H/2+12);
+      ctx.font='18px serif'; ctx.fillText('📍',W/2-10,H/2-28);
+      // progress
+      for(let i=0;i<5;i++){
+        ctx.fillStyle = i<=idx ? loc.color : '#333';
+        ctx.fillRect(W/2-54+i*24,H/2+26,18,8);
+      }
+      ctx.textAlign='left';
+    },
+    onKey(){}
+  };
+}
+
+// ─── TITLE ───────────────────────────────────────────────────
+function createTitle() {
+  let t=0;
+  const clouds=[{x:30,y:36,w:60},{x:190,y:22,w:80},{x:360,y:44,w:55}];
+
+  function drawCloud(cx,cy,cw){
+    ctx.fillStyle='rgba(255,255,255,0.92)';
+    ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx+cw*.35,cy-7,15,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx+cw*.68,cy,11,0,Math.PI*2); ctx.fill();
+    ctx.fillRect(cx,cy,cw*.68,12);
+  }
+
+  function drawHarley(x, gy){
+    const wr=10, wy=gy-wr;
+    // rear wheel (fat tire — cruiser style)
+    ctx.fillStyle='#0d0d0d'; ctx.beginPath(); ctx.arc(x+12,wy,wr,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#282828'; ctx.beginPath(); ctx.arc(x+12,wy,wr-3,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#888'; ctx.beginPath(); ctx.arc(x+12,wy,2.5,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='#555'; ctx.lineWidth=0.8;
+    for(let a=0;a<6;a++){ const ag=a*Math.PI/3; ctx.beginPath(); ctx.moveTo(x+12,wy); ctx.lineTo(x+12+Math.cos(ag)*(wr-3),wy+Math.sin(ag)*(wr-3)); ctx.stroke(); }
+    // rear fender
+    ctx.strokeStyle='#111'; ctx.lineWidth=2.5;
+    ctx.beginPath(); ctx.arc(x+12,wy,wr+2,Math.PI*1.15,Math.PI*1.85,true); ctx.stroke();
+    // front wheel
+    ctx.fillStyle='#0d0d0d'; ctx.beginPath(); ctx.arc(x+50,wy,wr,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#282828'; ctx.beginPath(); ctx.arc(x+50,wy,wr-3,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#888'; ctx.beginPath(); ctx.arc(x+50,wy,2.5,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='#555'; ctx.lineWidth=0.8;
+    for(let a=0;a<6;a++){ const ag=a*Math.PI/3; ctx.beginPath(); ctx.moveTo(x+50,wy); ctx.lineTo(x+50+Math.cos(ag)*(wr-3),wy+Math.sin(ag)*(wr-3)); ctx.stroke(); }
+    // front fender
+    ctx.strokeStyle='#111'; ctx.lineWidth=2.5;
+    ctx.beginPath(); ctx.arc(x+50,wy,wr+2,Math.PI*1.15,Math.PI*1.85,true); ctx.stroke();
+    // main frame (low cruiser rake)
+    ctx.strokeStyle='#181818'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.moveTo(x+12,wy-7); ctx.lineTo(x+26,wy-21); ctx.lineTo(x+42,wy-17); ctx.lineTo(x+50,wy-7); ctx.stroke();
+    // lower frame brace
+    ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(x+12,wy-7); ctx.lineTo(x+24,wy-10); ctx.lineTo(x+42,wy-10); ctx.stroke();
+    // tank (wide, low teardrop shape)
+    ctx.fillStyle='#111';
+    ctx.beginPath(); ctx.moveTo(x+18,wy-21); ctx.lineTo(x+40,wy-23); ctx.lineTo(x+42,wy-17); ctx.lineTo(x+18,wy-17); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='rgba(220,220,220,.15)'; ctx.fillRect(x+19,wy-22,18,4); // chrome sheen
+    // HD logo on tank (orange — Harley Davidson brand color)
+    ctx.fillStyle='#ff6600'; ctx.font='bold 5px sans-serif'; ctx.textAlign='center';
+    ctx.fillText('H-D',x+30,wy-17); ctx.textAlign='left';
+    // seat (long, stepped — classic cruiser)
+    px(x+15,wy-25,24,4,'#1a0e06');
+    px(x+16,wy-27,22,3,'#2e1a08');
+    ctx.fillStyle='rgba(255,255,255,.07)'; ctx.fillRect(x+17,wy-27,10,2);
+    // V-twin engine (chrome, exposed — signature Harley look)
+    px(x+22,wy-15,13,9,'#9a9a9a');
+    px(x+24,wy-13,9,5,'#c0c0c0');
+    px(x+22,wy-18,4,4,'#aaa'); px(x+30,wy-18,4,4,'#aaa'); // V-twin cylinder heads
+    px(x+23,wy-7,11,3,'#777'); // lower block
+    px(x+24,wy-14,3,3,'#ddd'); px(x+32,wy-14,3,3,'#ddd'); // chrome bolts
+    // exhaust pipe (low, sweeping chrome — Harley style)
+    ctx.strokeStyle='#a0a0a0'; ctx.lineWidth=2.5;
+    ctx.beginPath(); ctx.moveTo(x+23,wy-6); ctx.bezierCurveTo(x+14,wy-1,x+7,wy+2,x+2,wy+2); ctx.stroke();
+    ctx.fillStyle='#777'; ctx.beginPath(); ctx.arc(x+2,wy+2,3,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#444'; ctx.beginPath(); ctx.arc(x+2,wy+2,1.5,0,Math.PI*2); ctx.fill();
+    // front fork (raked, cruiser angle)
+    ctx.strokeStyle='#c0c0c0'; ctx.lineWidth=1.8;
+    ctx.beginPath(); ctx.moveTo(x+41,wy-17); ctx.lineTo(x+47,wy-1); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x+43,wy-17); ctx.lineTo(x+50,wy-1); ctx.stroke();
+    // ape hanger handlebars
+    ctx.strokeStyle='#c8c8c8'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(x+41,wy-17); ctx.lineTo(x+36,wy-30); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x+43,wy-17); ctx.lineTo(x+47,wy-30); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x+33,wy-30); ctx.lineTo(x+50,wy-30); ctx.stroke();
+    px(x+30,wy-32,5,4,'#222'); px(x+48,wy-32,5,4,'#222'); // grips
+    // headlight (round — classic Harley)
+    ctx.fillStyle='#fff8d0'; ctx.beginPath(); ctx.arc(x+54,wy-12,5,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#ffe530'; ctx.beginPath(); ctx.arc(x+54,wy-12,3,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='#aaa'; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(x+54,wy-12,5,0,Math.PI*2); ctx.stroke();
+  }
+
+  return {
+    update(){
+      t++;
+      for(let c of clouds){ c.x+=.25; if(c.x>W+100) c.x=-100; }
+      if(t%40===0) spawnHeart();
+      updateFHearts();
+    },
+    draw(){
+      // daytime sky gradient
+      const sky=ctx.createLinearGradient(0,0,0,H*.58);
+      sky.addColorStop(0,'#3a84cc'); sky.addColorStop(1,'#a8d8f0');
+      ctx.fillStyle=sky; ctx.fillRect(0,0,W,H);
+      // sun
+      ctx.fillStyle='#ffe84a'; ctx.beginPath(); ctx.arc(W-68,42,20,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#ffdd22'; ctx.beginPath(); ctx.arc(W-68,42,14,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle='rgba(255,230,40,.35)'; ctx.lineWidth=2;
+      for(let r=0;r<8;r++){ const a=r*Math.PI/4+t*.006; ctx.beginPath(); ctx.moveTo(W-68+Math.cos(a)*22,42+Math.sin(a)*22); ctx.lineTo(W-68+Math.cos(a)*32,42+Math.sin(a)*32); ctx.stroke(); }
+      // clouds
+      for(let c of clouds) drawCloud(c.x,c.y,c.w);
+      // distant hills
+      ctx.fillStyle='#5aaa55';
+      ctx.beginPath(); ctx.moveTo(0,H-95);
+      for(let hx=0;hx<=W;hx+=15) ctx.lineTo(hx,H-95-Math.sin(hx*.028)*20-Math.sin(hx*.07)*9);
+      ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath(); ctx.fill();
+      ctx.fillStyle='#4a9a44';
+      ctx.beginPath(); ctx.moveTo(0,H-72);
+      for(let hx=0;hx<=W;hx+=15) ctx.lineTo(hx,H-72-Math.sin(hx*.04+1.5)*12-Math.sin(hx*.1+.8)*6);
+      ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath(); ctx.fill();
+      // grass strip beside road
+      px(0,H-58,W,10,'#44aa44');
+      // road (asphalt)
+      px(0,H-48,W,48,'#4a4a58');
+      px(0,H-51,W,4,'#5a5a68'); // edge highlight
+      // road markings
+      px(0,H-49,W,2,'#e8e020'); // yellow center stripe
+      ctx.fillStyle='rgba(255,255,255,.7)';
+      for(let dx=0;dx<W;dx+=34){ ctx.fillRect(dx,H-25,20,3); } // white dashes
+      px(0,H-2,W,2,'rgba(255,255,255,.5)');
+      // slight shadow on road edge
+      ctx.fillStyle='rgba(0,0,0,.2)'; ctx.fillRect(0,H-48,W,4);
+
+      drawFHearts();
+      // Harley Davidson
+      drawHarley(200,H-48);
+      // Characters flanking the moto
+      drawChef(165,H-77,1,t/22);
+      drawMrsPuff(270,H-75,t/22);
+      // heart above center
+      drawHeart(W/2-7,H-100,10);
+
+      // title
+      ctx.save();
+      ctx.shadowColor=C.pink; ctx.shadowBlur=16;
+      ctx.fillStyle=C.pink2; ctx.font='bold 26px "Courier New"'; ctx.textAlign='center';
+      ctx.fillText("Chef's Quest",W/2,54);
+      ctx.shadowBlur=0;
+      ctx.fillStyle=C.gold; ctx.font='12px "Courier New"';
+      ctx.fillText('♥  Uma Aventura de Amor  ♥',W/2,76);
+      ctx.restore();
+      ctx.textAlign='center';
+      if(Math.floor(t/30)%2===0){ ctx.fillStyle=C.white; ctx.font='10px "Courier New"'; ctx.fillText('[ PRESSIONE ESPAÇO ]',W/2,H-6); }
+      ctx.textAlign='left';
+    },
+    onKey(code){ if(code==='Space'||code==='Enter') fadeToScene(createIntro); }
+  };
+}
+
+// ─── INTRO ───────────────────────────────────────────────────
+function createIntro() {
+  let t=0;
+  showDialog([
+    'Toda grande aventura começa com um encontro inesperado...',
+    'Chef acordou numa sexta-feira aparentemente normal.',
+    'Mas alguns dias têm o poder de mudar tudo.',
+    'Esta é a história dos dois.  Cinco lugares.  Uma missão.',
+    'Encontrar Mrs. Puff. ♥',
+  ], ()=>fadeToScene(()=>createLocCard(0)));
+  return {
+    update(){ t++; updateDialog(); updateFHearts(); },
+    draw(){
+      px(0,0,W,H,C.bg);
+      for(let i=0;i<30;i++){
+        const sx=(i*73+11)%W, sy=(i*97+7)%(H-90);
+        ctx.fillStyle=`rgba(255,255,255,${.15+.25*Math.sin(t*.04+i)})`; ctx.fillRect(sx,sy,2,2);
+      }
+      drawFHearts(); drawChef(W/2,H/2-18,1,t/20); drawDialog();
+    },
+    onKey(){}
+  };
+}
+
+// ─── DISPATCH ────────────────────────────────────────────────
+function createGame(idx, skipIntro=false){
+  switch(idx){
+    case 0: return createGym(skipIntro);
+    case 1: return createHill(skipIntro);
+    case 2: return createCinema(skipIntro);
+    case 3: return createBeach(skipIntro);
+    case 4: return createIceCream(skipIntro);
+    case 5: return createDailyLife(skipIntro);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FASE 1 — FLA FIT (Simon Says)
+// ═══════════════════════════════════════════════════════════════
+function createGym(skipIntro=false) {
+  let phase='dialog', seq=[], input=[], showIdx=-1, showT=0, round=0, maxRound=3;
+  let inputIdx=0, flashKey=null, flashT=0, errFlash=false, errT=0, succT=0, t=0, frame=0;
+  const DIRS=['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'];
+  const LABELS=['▲','▼','◄','►'];
+  const DCOLORS=[C.red,C.grn,C.yel,C.blu];
+  const DNAMES=['OMBRO','AGACHAMENTO','BÍCEPS','TRÍCEPS'];
+  const BTN=[{x:220,y:75,d:0},{x:220,y:115,d:1},{x:180,y:95,d:2},{x:260,y:95,d:3}];
+
+  function genSeq(){ seq=[]; for(let i=0;i<round+2;i++) seq.push(Math.floor(Math.random()*4)); }
+  function startRound(){ genSeq(); input=[]; inputIdx=0; showIdx=-1; showT=0; phase='watch'; }
+
+  if(skipIntro) {
+    startRound();
+  } else {
+    showDialog([
+      'Fla Fit Academia. Uma sexta-feira qualquer.',
+      'Você estava na polia fazendo tríceps francês quando...',
+      'percebeu que não estava mais sozinho no salão.',
+      'Repita as sequências de exercícios! ▲▼◄► e ESPAÇO.',
+      'Observe a sequência e repita com as setas.',
+    ], ()=>{ phase='game'; startRound(); });
+  }
+
+  return {
+    update(){
+      t++; frame+=.1;
+      if(phase==='dialog'||phase==='outro'){ updateDialog(); return; }
+      if(flashT>0){ flashT--; if(flashT===0) flashKey=null; }
+      if(errT>0){ errT--; if(errT===0) errFlash=false; }
+      if(phase==='watch'){
+        showT++;
+        if(showT>45){ showT=0; showIdx++;
+          if(showIdx>=seq.length){ phase='input'; showIdx=-1; }
+        }
+      }
+      if(phase==='success'){
+        succT++;
+        if(succT>70){
+          round++;
+          if(round>=maxRound){
+            showDialog([
+              '"Você se lembrou de cada movimento."',
+              '"Assim como eu me lembro do primeiro dia que te vi."',
+              'Fase 1 concluída! Próxima missão: Morro do Rato. ⛰️',
+            ], ()=>fadeToScene(()=>createLocCard(1)));
+            phase='outro';
+          } else startRound();
+        }
+      }
+      updateFHearts();
+    },
+    draw(){
+      // parede fundo escura com textura de listras
+      px(0,0,W,H-58,'#0e0808');
+      for(let gx=0;gx<W;gx+=32){ ctx.fillStyle=`rgba(255,80,80,${gx%64===0?.04:.015})`; ctx.fillRect(gx,0,2,H-58); }
+      // piso da academia
+      px(0,H-58,W,58,'#1a0e0e');
+      px(0,H-60,W,4,'#2a1414');
+      for(let fx=0;fx<W;fx+=48){ ctx.fillStyle='rgba(255,255,255,.025)'; ctx.fillRect(fx,H-58,24,58); }
+
+      // ── LOGO FLA FIT centralizado na parede ──
+      px(W/2-68,6,136,44,'#bb0f1f');
+      px(W/2-66,7,132,42,'#dd1122');
+      // brilho no logo
+      ctx.fillStyle='rgba(255,255,255,.12)'; ctx.fillRect(W/2-66,7,132,14);
+      ctx.fillStyle=C.white; ctx.font='bold 16px "Courier New"'; ctx.textAlign='center';
+      ctx.fillText('FLA FIT',W/2,27);
+      ctx.fillStyle='#ffdd44'; ctx.font='bold 8px "Courier New"';
+      ctx.fillText('A C A D E M I A',W/2,40);
+      // barras decorativas
+      px(W/2-64,49,30,3,'#ffdd44'); px(W/2+34,49,30,3,'#ffdd44');
+      ctx.fillStyle='#ff6655'; ctx.font='6px "Courier New"';
+      ctx.fillText('★  FORCE YOUR LIMITS  ★',W/2,60);
+      ctx.textAlign='left';
+
+      // ── ESPELHO grande à esquerda ──
+      px(4,8,62,H-68,'#121c28');
+      px(4,8,62,2,'#5a9abb'); px(4,H-62,62,2,'#5a9abb');
+      px(4,8,2,H-68,'#5a9abb'); px(64,8,2,H-68,'#5a9abb');
+      ctx.fillStyle='rgba(130,190,230,.06)'; ctx.fillRect(6,10,58,H-72);
+      ctx.fillStyle='rgba(255,255,255,.03)'; ctx.fillRect(6,10,58,20);
+      // "reflexo" do chef no espelho
+      ctx.save(); ctx.globalAlpha=.35; ctx.scale(-1,1); drawChef(-26,H-102,-1,frame); ctx.restore();
+
+      // ── PÔSTER motivacional ──
+      px(W-88,8,80,60,'#110606');
+      px(W-86,10,76,56,'#1a0808');
+      ctx.fillStyle='#ff3333'; ctx.font='bold 8px "Courier New"'; ctx.textAlign='center';
+      ctx.fillText('NO PAIN',W-48,28); ctx.fillText('NO GAIN',W-48,40);
+      px(W-82,44,72,2,'#ff3333');
+      ctx.fillStyle='#ffaa44'; ctx.font='6px "Courier New"';
+      ctx.fillText('FLA FIT ★',W-48,58); ctx.textAlign='left';
+
+      // ── POLIA / CABLE MACHINE (à esquerda) ──
+      px(72,H-230,12,170,'#3a3a40');
+      px(70,H-232,16,6,'#555');
+      ctx.fillStyle='#666'; ctx.beginPath(); ctx.arc(78,H-230,9,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#999'; ctx.beginPath(); ctx.arc(78,H-230,6,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#333'; ctx.beginPath(); ctx.arc(78,H-230,2.5,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle='#bbb'; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.moveTo(78,H-221); ctx.lineTo(78,H-138); ctx.stroke();
+      px(72,H-140,12,5,'#888');
+      for(let ws=0;ws<6;ws++) px(71,H-100-ws*9,14,7,ws%2?'#444':'#555');
+      px(69,H-100,18,3,'#777');
+
+      // ── BANCO DE SUPINO ──
+      px(100,H-98,65,8,'#555');
+      px(103,H-136,6,42,'#555'); px(155,H-136,6,42,'#555');
+      px(97,H-104,8,12,'#777'); px(159,H-104,8,12,'#777');
+      // barra
+      px(96,H-137,72,5,'#aaa');
+      px(91,H-136,8,12,'#bbb'); px(164,H-136,8,12,'#bbb');
+
+      // ── ESTEIRA (treadmill) ──
+      function treadmill(x,y){
+        px(x,y,48,22,'#2a2a2a'); px(x+2,y+2,44,16,'#1a1a1a');
+        // belt animado
+        for(let b=0;b<6;b++) px(x+2+b*7+(Math.floor(t/4)%7),y+4,4,10,'#222');
+        px(x,y+20,48,5,'#3a3a3a');
+        px(x+18,y-18,12,18,'#333'); px(x+19,y-18,10,4,'#555');
+        px(x+4,y-10,6,10,'#444'); px(x+38,y-10,6,10,'#444');
+        px(x+4,y-12,40,4,'#666');
+        px(x+14,y-16,20,12,'#0a2010');
+        ctx.fillStyle='#44ff55'; ctx.font='5px monospace'; ctx.textAlign='center';
+        ctx.fillText('5.0',x+24,y-8); ctx.textAlign='left';
+      }
+      treadmill(148,H-108); treadmill(205,H-108);
+
+      // ── NPCs nas esteiras ──
+      const nf=Math.floor(t/10)%2;
+      // NPC 1 (azul)
+      px(163,H-138,8,14,'#2244aa'); px(164,H-153,6,10,C.skin);
+      px(162,H-157,8,5,'#1a1008');
+      px(162,H-126+nf*2,4,9,'#1a3388'); px(166,H-126+(1-nf)*2,4,9,'#1a3388');
+      // NPC 2 (vermelho)
+      px(220,H-138,8,14,'#aa2211'); px(221,H-153,6,10,C.skin);
+      px(219,H-157,8,5,'#222');
+      px(220,H-126+nf*2,4,9,'#881a08'); px(224,H-126+(1-nf)*2,4,9,'#881a08');
+
+      // ── RACK DE ANILHAS ──
+      px(270,H-88,55,6,'#555');
+      px(271,H-96,8,10,'#444'); px(283,H-96,8,10,'#444'); px(295,H-96,8,10,'#444'); px(307,H-96,8,10,'#444');
+      for(let d=0;d<4;d++){
+        const dx=272+d*12;
+        px(dx,H-102,6,5,'#888'); px(dx-1,H-104,8,4,'#666');
+      }
+
+      // ── ANILHAS NO CHÃO ──
+      for(let i=0;i<5;i++){ const wx=330+i*20; px(wx,H-90,12,28,i%2?'#444':'#555'); px(wx+2,H-88,8,24,'#2a2a2a'); }
+
+      // characters
+      drawChef(80,H-102,1,frame);
+      drawMrsPuff(W-150,H-100,t/20);
+      // simon ui
+      if(phase!=='dialog'&&phase!=='outro'){
+        ctx.fillStyle='rgba(0,0,0,.8)'; ctx.fillRect(155,26,165,148);
+        ctx.strokeStyle=C.pink; ctx.lineWidth=2; ctx.strokeRect(155,26,165,148);
+        ctx.textAlign='center';
+        ctx.fillStyle=C.gold; ctx.font='10px "Courier New"';
+        ctx.fillText(`SEQUÊNCIA ${round+1} de ${maxRound}`,238,44);
+        // dots progress
+        for(let i=0;i<seq.length;i++){
+          const filled = phase==='watch'&&i<showIdx+1 || phase==='input'&&i<inputIdx || phase==='success';
+          ctx.fillStyle = filled ? DCOLORS[seq[i]]:'#333';
+          ctx.fillRect(166+i*12,50,8,5);
+        }
+        for(let b of BTN){
+          const active=(phase==='watch'&&showIdx>=0&&seq[showIdx]===b.d)||(flashKey===b.d);
+          ctx.fillStyle=active?DCOLORS[b.d]:'#2a2a2a';
+          ctx.fillRect(b.x-15,b.y-15,30,30);
+          ctx.strokeStyle=DCOLORS[b.d]; ctx.lineWidth=1.5; ctx.strokeRect(b.x-15,b.y-15,30,30);
+          ctx.fillStyle=active?C.black:DCOLORS[b.d];
+          ctx.font='15px monospace'; ctx.fillText(LABELS[b.d],b.x,b.y+6);
+          // small label
+          ctx.fillStyle='rgba(255,255,255,.35)'; ctx.font='7px "Courier New"';
+          ctx.fillText(DNAMES[b.d],b.x,b.y+22);
+        }
+        ctx.font='10px "Courier New"';
+        if(phase==='watch')     { ctx.fillStyle=C.yel;   ctx.fillText('OBSERVE...',238,158); }
+        if(phase==='input')     { ctx.fillStyle=C.white; ctx.fillText(`REPITA! (${inputIdx}/${seq.length})`,238,158); }
+        if(phase==='success')   { ctx.fillStyle=C.gold;  ctx.fillText('PERFEITO! ♥',238,158); }
+        if(errFlash)            { ctx.fillStyle=C.red;   ctx.fillText('ERROU! RECOMEÇANDO...',238,158); }
+        ctx.textAlign='left';
+      }
+      drawFHearts(); drawDialog();
+    },
+    onKey(code){
+      if(phase!=='input') return;
+      const d=DIRS.indexOf(code); if(d===-1) return;
+      flashKey=d; flashT=18;
+      if(seq[inputIdx]===d){
+        inputIdx++;
+        if(inputIdx>=seq.length){ SFX.success(); phase='success'; succT=0; errFlash=false; for(let i=0;i<6;i++) spawnHeart(); }
+      } else {
+        SFX.error();
+        errFlash=true; errT=60; startRound();
+      }
+    }
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FASE 2 — MORRO DO RATO (Plataforma)
+// ═══════════════════════════════════════════════════════════════
+function createHill(skipIntro=false) {
+  let phase='dialog', t=0, frame=0, dir=1;
+  let px2=40, py2=H-50, vy=0, onGround=false;
+  let collected=0, won=false, wonT=0;
+  const PLATS=[
+    {x:0,   y:H-46, w:160, vx:0,   ox:0,   range:0  },
+    {x:105, y:H-93, w:100, vx:1.4, ox:105, range:55 },
+    {x:175, y:H-140,w:90,  vx:0,   ox:175, range:0  },
+    {x:240, y:H-183,w:80,  vx:-1.8,ox:240, range:65 },
+    {x:310, y:H-224,w:85,  vx:0,   ox:310, range:0  },
+    {x:370, y:H-262,w:100, vx:1.2, ox:370, range:45 },
+  ];
+  const HEARTS=[
+    {x:155,y:H-112,got:false},{x:225,y:H-158,got:false},
+    {x:290,y:H-200,got:false},{x:358,y:H-240,got:false},
+    {x:405,y:H-280,got:false},
+  ];
+  // chuva
+  const rain = Array.from({length:80}, ()=>({
+    x: Math.random()*W, y: Math.random()*H,
+    vy: 4+Math.random()*3, vx: -1, len: 6+Math.random()*6
+  }));
+
+  function land(px,py){
+    for(let p of PLATS) if(px+6>=p.x&&px-6<=p.x+p.w&&py>p.y-3&&py<=p.y+6) return p;
+    return null;
+  }
+
+  if(skipIntro) {
+    phase='game';
+  } else {
+    showDialog([
+      'No dia seguinte, a turma subiu o Morro do Rato.',
+      'O que parecia uma caminhada comum mudaria tudo.',
+      'Colete as goiabas pelo caminho e chegue ao topo!',
+      'SETAS para mover,  ↑ ou ESPAÇO para pular!',
+    ], ()=>{ phase='game'; });
+  }
+
+  return {
+    update(){
+      t++; if(phase==='dialog'){ updateDialog(); return; }
+      if(phase==='outro'){ updateDialog(); return; }
+      frame+=.15;
+      // mover plataformas
+      for(let p of PLATS){
+        if(p.vx!==0){
+          p.x+=p.vx;
+          if(p.x>p.ox+p.range||p.x<p.ox-p.range) p.vx*=-1;
+        }
+      }
+      if(keys['ArrowRight']||keys['KeyD']){ px2+=2.2; dir=1; }
+      if(keys['ArrowLeft']||keys['KeyA'])  { px2-=2.2; dir=-1; }
+      px2=Math.max(8,Math.min(W-8,px2));
+      vy+=.38; py2+=vy;
+      onGround=false;
+      const p=land(px2,py2);
+      if(p){ py2=p.y; vy=0; onGround=true; }
+      if(py2>H){ py2=H-46; px2=40; vy=0; }
+      if((justPressed['ArrowUp']||justPressed['KeyW']||justPressed['Space'])&&onGround){ SFX.jump(); vy=-7.5; }
+      for(let h of HEARTS){
+        const hy=h.y+Math.sin(t*.09+h.x)*2;
+        const chefCollectY=py2-14;
+        if(!h.got&&Math.abs(px2-h.x)<16&&Math.abs(chefCollectY-hy)<24){ SFX.collect(); h.got=true; collected++; for(let i=0;i<3;i++) spawnHeart(h.x,hy); }
+      }
+      if(!won&&px2>410&&py2<H-250){ SFX.success(); won=true; wonT=0; for(let i=0;i<8;i++) spawnHeart(); }
+      if(won){ wonT++;
+        if(wonT===50){
+          showDialog([
+            '"No topo do Morro do Rato, entre risadas e o vento,"',
+            '"você percebeu que o coração já havia escolhido."',
+            `Goiabas coletadas: ${collected}/5 🍃`,
+            'Fase 2 concluída! Próxima: Cinema! 🎬',
+          ], ()=>fadeToScene(()=>createLocCard(2)));
+          phase='outro';
+        }
+      }
+      // atualiza chuva
+      for(let r of rain){ r.y+=r.vy; r.x+=r.vx; if(r.y>H){ r.y=-10; r.x=Math.random()*W; } }
+      updateFHearts();
+    },
+    draw(){
+      // ── CÉU TEMPESTUOSO ──
+      const grad=ctx.createLinearGradient(0,0,0,H);
+      grad.addColorStop(0,'#28303a'); grad.addColorStop(.5,'#3a4452'); grad.addColorStop(1,'#4a5560');
+      ctx.fillStyle=grad; ctx.fillRect(0,0,W,H);
+      // raio ocasional (flash de relâmpago)
+      if(Math.floor(t/60)%20===0||Math.floor(t/60)%20===1){
+        ctx.fillStyle='rgba(200,220,255,.12)'; ctx.fillRect(0,0,W,H);
+      }
+      // nuvens carregadas em camadas
+      function stormCloud(cx,cy,s,alpha){
+        ctx.fillStyle=`rgba(40,45,55,${alpha})`;
+        ctx.fillRect(cx,cy,s*2.2,s*.65); ctx.fillRect(cx+s*.25,cy-s*.4,s*1.6,s*.65);
+        ctx.fillRect(cx+s*.05,cy-s*.2,s*2,s*.3);
+      }
+      stormCloud(0,8,32,.98); stormCloud(140,4,28,.95); stormCloud(280,10,30,.97); stormCloud(390,2,26,.96);
+      stormCloud(60,18,20,.7); stormCloud(220,22,18,.65); stormCloud(350,16,22,.7);
+      // relâmpago no céu
+      if(Math.floor(t/60)%20===0){
+        ctx.strokeStyle='rgba(220,240,255,.9)'; ctx.lineWidth=1.5;
+        ctx.beginPath(); ctx.moveTo(320,15); ctx.lineTo(310,35); ctx.lineTo(325,35); ctx.lineTo(312,58); ctx.stroke();
+      }
+      // corvos voando na tempestade
+      for(let crow=0;crow<3;crow++){
+        const cx=((t*.8+crow*160)%W+W)%W, cy=25+crow*12+Math.sin(t*.04+crow)*5;
+        ctx.strokeStyle='rgba(30,30,40,.9)'; ctx.lineWidth=1.2;
+        ctx.beginPath(); ctx.moveTo(cx,cy); ctx.quadraticCurveTo(cx+5,cy-4,cx+10,cy); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx+10,cy); ctx.quadraticCurveTo(cx+15,cy-4,cx+20,cy); ctx.stroke();
+      }
+      // chuva
+      ctx.strokeStyle='rgba(180,210,255,.45)'; ctx.lineWidth=1;
+      for(let r of rain){
+        ctx.beginPath(); ctx.moveTo(r.x,r.y); ctx.lineTo(r.x+r.vx*2,r.y+r.len); ctx.stroke();
+      }
+      // ── MONTANHAS DISTANTES (névoa) ──
+      ctx.fillStyle='rgba(50,65,55,.6)';
+      ctx.beginPath(); ctx.moveTo(0,H*.55);
+      ctx.lineTo(60,H*.3); ctx.lineTo(130,H*.45); ctx.lineTo(200,H*.25); ctx.lineTo(280,H*.4);
+      ctx.lineTo(350,H*.2); ctx.lineTo(420,H*.38); ctx.lineTo(W,H*.28); ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath(); ctx.fill();
+      // névoa nas montanhas
+      ctx.fillStyle='rgba(70,90,80,.3)';
+      ctx.beginPath(); ctx.moveTo(0,H*.5); ctx.lineTo(W,H*.4); ctx.lineTo(W,H*.55); ctx.lineTo(0,H*.65); ctx.closePath(); ctx.fill();
+      // ── MORRO PRINCIPAL ──
+      ctx.fillStyle='#2e4d1e';
+      ctx.beginPath(); ctx.moveTo(0,H);
+      ctx.bezierCurveTo(80,H*.45,220,H*.22,380,H*.16);
+      ctx.bezierCurveTo(440,H*.13,W,H*.22,W,H*.25);
+      ctx.lineTo(W,H); ctx.closePath(); ctx.fill();
+      // camada de vegetação mais escura
+      ctx.fillStyle='#223d14';
+      ctx.beginPath(); ctx.moveTo(0,H);
+      ctx.bezierCurveTo(60,H*.58,200,H*.38,360,H*.32);
+      ctx.bezierCurveTo(420,H*.28,W,H*.36,W,H*.4);
+      ctx.lineTo(W,H); ctx.closePath(); ctx.fill();
+      // ── ÁRVORES NO FUNDO ──
+      function bgTree(x,y,h2){
+        px(x-2,y,4,h2,C.brown);
+        ctx.fillStyle='#1a3a10'; ctx.beginPath();
+        ctx.moveTo(x,y-h2*.4); ctx.lineTo(x-14,y+8); ctx.lineTo(x+14,y+8); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(x,y-h2*.65); ctx.lineTo(x-10,y); ctx.lineTo(x+10,y); ctx.closePath(); ctx.fill();
+      }
+      bgTree(30,H-130,40); bgTree(70,H-115,34); bgTree(400,H-145,44); bgTree(440,H-120,36); bgTree(W-20,H-130,40);
+      // ── PLATAFORMAS com detalhes ──
+      for(let p of PLATS){
+        px(p.x,p.y,p.w,12,'#1e4010'); px(p.x,p.y,p.w,4,'#2e6018');
+        ctx.fillStyle='#268020';
+        for(let gx=p.x+4;gx<p.x+p.w-4;gx+=7) ctx.fillRect(gx,p.y+1,2,3);
+        // pedras nas plataformas
+        if(p.w>80){
+          ctx.fillStyle='#5a5a60'; ctx.beginPath(); ctx.ellipse(p.x+p.w-15,p.y-3,6,4,0,0,Math.PI*2); ctx.fill();
+          ctx.fillStyle='#777'; ctx.beginPath(); ctx.ellipse(p.x+p.w-14,p.y-4,3,2.5,0,0,Math.PI*2); ctx.fill();
+        }
+        // poças de chuva nas plataformas
+        ctx.fillStyle='rgba(100,160,200,.3)';
+        ctx.beginPath(); ctx.ellipse(p.x+20,p.y+8,8,3,0,0,Math.PI*2); ctx.fill();
+        // ondinha na poça
+        if(Math.floor(t/30)%2===0){
+          ctx.strokeStyle='rgba(150,200,230,.4)'; ctx.lineWidth=.8;
+          ctx.beginPath(); ctx.ellipse(p.x+20,p.y+8,6,2,0,0,Math.PI*2); ctx.stroke();
+        }
+      }
+      // ── GOIABAS ──
+      for(let h of HEARTS){
+        if(!h.got){
+          const bob=Math.sin(t*.09+h.x)*2;
+          const gx=h.x, gy=h.y+bob;
+          ctx.fillStyle='#88cc44'; ctx.beginPath(); ctx.ellipse(gx,gy,7,8,0,0,Math.PI*2); ctx.fill();
+          ctx.fillStyle='#ffaaaa'; ctx.beginPath(); ctx.ellipse(gx,gy+1,4,5,0,0,Math.PI*2); ctx.fill();
+          ctx.fillStyle='#cc8844';
+          ctx.fillRect(gx-1,gy-1,2,2); ctx.fillRect(gx+1,gy+2,2,2); ctx.fillRect(gx-2,gy+1,2,2);
+          px(gx-1,gy-8,2,4,'#336622');
+          px(gx,gy-10,5,3,'#44aa22'); px(gx-4,gy-9,4,2,'#44aa22');
+        }
+      }
+      // ── BANDEIRA ──
+      px(435,H-297,3,38,C.brown); px(438,H-297,22,13,C.red); px(438,H-284,22,7,C.white);
+      ctx.fillStyle=C.red; ctx.font='8px "Courier New"'; ctx.fillText('META',440,H-289);
+      // névoa na base
+      const fogGrad=ctx.createLinearGradient(0,H-55,0,H-20);
+      fogGrad.addColorStop(0,'rgba(80,100,90,0)'); fogGrad.addColorStop(1,'rgba(80,100,90,.35)');
+      ctx.fillStyle=fogGrad; ctx.fillRect(0,H-55,W,35);
+      drawFHearts();
+      drawChef(px2,py2-28,dir,frame);
+      ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(8,8,160,22);
+      ctx.fillStyle=C.white; ctx.font='11px "Courier New"';
+      ctx.fillText(`🍃 ${collected}/5 goiabas  FASE 2`,14,23);
+      drawDialog();
+    },
+    onKey(){}
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FASE 3 — CINEMA (Quiz fofo)
+// ═══════════════════════════════════════════════════════════════
+function createCinema(skipIntro=false) {
+  let phase='dialog', t=0, sel=0, answered=false, ansT=0, qi=0;
+  let wrongAns=false, wrongT=0;
+  const QS=[
+    {
+      q:'Como você se sentiu sentado ao lado dela no cinema?',
+      opts:['Calor (o ar-cond estava quebrado)','Que era um sonho bom demais','Borboletas no estômago','As três ao mesmo tempo'],
+      resp:['Havia algo mais do que calor...','Era real, mas havia mais...','Quase! Pensa um pouco mais...','Exatamente isso — e ela sentiu o mesmo.'],
+      correct:3,
+    },
+    {
+      q:'Qual o apelido especial que você ganhou dela?',
+      opts:['Pequenininho','O Chefe','Chef','Nenhum ainda'],
+      resp:['Pequenininho... fofo, mas não é esse.','Quase lá! Tente de novo.','Chef! Simples e perfeito.','Você sabe qual é...'],
+      correct:2,
+    },
+    {
+      q:'Qual o gênero de filme favorito dela?',
+      opts:['Ação','Comédia','Documentário','Romance'],
+      resp:['Ação tem adrenalina, mas ela prefere outro...','Comédia faz rir, mas Romance faz sentir.','Pensa melhor...','Romance! O coração dela sabe o que quer.'],
+      correct:3,
+    },
+    {
+      q:'Qual o diretor favorito dela?',
+      opts:['Quentin Tarantino','Tim Burton','Steven Spielberg','Alfred Hitchcock'],
+      resp:['Tarantino é intenso, mas não é ele...','Burton é sombrio, mas não é ele.','Spielberg é genial, mas ela tem outro favorito.','Hitchcock! O mestre do suspense — igual ela.'],
+      correct:3,
+    },
+    {
+      q:'Qual o filme favorito dela que vocês assistiram juntos?',
+      opts:['Nosferatu','It','Psicose','Drácula'],
+      resp:['Nosferatu foi inesquecível, mas não é o favorito...','It dá medo, mas não foi esse.','Psicose! O favorito dela — e assistiram juntos.','Drácula é clássico, mas não foi esse.'],
+      correct:2,
+    },
+  ];
+
+  if(skipIntro) {
+    phase='quiz';
+  } else {
+    showDialog([
+      'Cinema. Luzes apagadas. Coração acelerado.',
+      'O primeiro encontro de verdade.',
+      'Responda as perguntas para desbloquear a memória!',
+      'Use ↑↓ para escolher e ESPAÇO para confirmar.',
+    ], ()=>{ phase='quiz'; });
+  }
+
+  return {
+    update(){
+      t++;
+      if(phase==='dialog'){ updateDialog(); return; }
+      if(phase==='outro'){ updateDialog(); return; }
+      if(wrongAns){ wrongT++; if(wrongT>70){ wrongAns=false; wrongT=0; } }
+      if(!answered&&!wrongAns){
+        if(justPressed['ArrowUp']||justPressed['KeyW']) sel=Math.max(0,sel-1);
+        if(justPressed['ArrowDown']||justPressed['KeyS']) sel=Math.min(3,sel+1);
+      } else if(answered) {
+        ansT++;
+        if(ansT>90){ answered=false; qi++; sel=0;
+          if(qi>=QS.length){
+            showDialog([
+              '"Naquele escuro do cinema, o mundo lá fora sumiu."',
+              '"Só existiam você, ela e aquele momento."',
+              'Fase 3 concluída! Próxima: Praia de Santa Clara! 🌊',
+            ], ()=>fadeToScene(()=>createLocCard(3)));
+            phase='outro';
+          }
+        }
+      }
+      updateFHearts();
+    },
+    draw(){
+      px(0,0,W,H,'#06030e');
+      // paredes laterais escuras
+      ctx.fillStyle='#080514'; ctx.fillRect(0,0,26,H); ctx.fillRect(W-26,0,26,H);
+      ctx.fillStyle='#0a0618'; ctx.fillRect(0,0,W,4);
+      // saída de emergência — apenas placa verde, sem poster
+      ctx.fillStyle='#003a00'; ctx.fillRect(1,H-70,24,12);
+      ctx.fillStyle='#00dd00'; ctx.font='5px "Courier New"'; ctx.textAlign='center';
+      ctx.fillText('SAÍDA',13,H-61); ctx.textAlign='left';
+      ctx.fillStyle='#003a00'; ctx.fillRect(W-25,H-70,24,12);
+      ctx.fillStyle='#00dd00'; ctx.font='5px "Courier New"'; ctx.textAlign='center';
+      ctx.fillText('SAÍDA',W-13,H-61); ctx.textAlign='left';
+      // feixe do projetor
+      ctx.save();
+      const projGrad=ctx.createLinearGradient(W/2,H-10,W/2,3);
+      projGrad.addColorStop(0,'rgba(200,180,255,0.0)');
+      projGrad.addColorStop(1,'rgba(200,180,255,0.11)');
+      ctx.fillStyle=projGrad;
+      ctx.beginPath(); ctx.moveTo(W/2-10,H-2); ctx.lineTo(W/2+10,H-2); ctx.lineTo(W-38,3); ctx.lineTo(38,3); ctx.closePath();
+      ctx.fill(); ctx.restore();
+      // ══ TELA DO CINEMA — maior e mais destacada ══
+      const SX=32, SY=3, SW=W-64, SH=84; // tela bem maior
+      const flicker=Math.random()<.04?0.82:1.0;
+      ctx.save(); ctx.globalAlpha=flicker;
+      // fundo da tela: noite azul-escura
+      const screenGrad=ctx.createLinearGradient(SX,SY,SX,SY+SH);
+      screenGrad.addColorStop(0,'#06031a'); screenGrad.addColorStop(1,'#10052a');
+      ctx.fillStyle=screenGrad; ctx.fillRect(SX,SY,SW,SH);
+      // lua grande e dramática
+      ctx.fillStyle='#fff0c0'; ctx.beginPath(); ctx.arc(SX+60,SY+26,18,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#d8c870'; ctx.fillRect(SX+56,SY+14,6,3); ctx.fillRect(SX+50,SY+20,4,3); ctx.fillRect(SX+64,SY+22,5,3);
+      // nuvens sombrias cobrindo parcialmente a lua
+      ctx.fillStyle='rgba(8,4,20,0.55)'; ctx.fillRect(SX+44,SY+8,30,12); ctx.fillRect(SX+54,SY+30,28,8);
+      // castelo ao fundo (Nosferatu vibe)
+      ctx.fillStyle='#0a0418';
+      ctx.fillRect(SX+SW-70,SY+30,40,54); // torre principal
+      ctx.fillRect(SX+SW-66,SY+24,8,12); ctx.fillRect(SX+SW-42,SY+22,8,14); // ameias
+      ctx.fillRect(SX+SW-64,SY+38,6,8); ctx.fillRect(SX+SW-52,SY+36,6,8); // janelas
+      ctx.fillRect(SX+SW-80,SY+46,14,38); ctx.fillRect(SX+SW-28,SY+50,14,34); // torres laterais
+      // árvores mortas nas laterais
+      ctx.fillStyle='#08030e';
+      for(let tx=SX+4;tx<SX+90;tx+=14){
+        const th=22+Math.sin(tx)*.7*8;
+        ctx.fillRect(tx+4,SY+SH-th,3,th);
+        ctx.fillRect(tx,SY+SH-th+4,5,3); ctx.fillRect(tx+7,SY+SH-th+6,5,3);
+      }
+      // ── VAMPIRO (Nosferatu) no centro da tela ──
+      const vx=W/2-10, vy=SY+12;
+      // capa longa aberta (preta, icônica)
+      ctx.fillStyle='#0a0010';
+      ctx.beginPath(); ctx.moveTo(vx-2,vy+14); ctx.lineTo(vx-22,vy+SH-8); ctx.lineTo(vx+24,vy+SH-8); ctx.lineTo(vx+4,vy+14); ctx.closePath(); ctx.fill();
+      // brilho interior da capa (vermelho profundo)
+      ctx.fillStyle='#220010';
+      ctx.beginPath(); ctx.moveTo(vx,vy+18); ctx.lineTo(vx-14,vy+SH-10); ctx.lineTo(vx+16,vy+SH-10); ctx.closePath(); ctx.fill();
+      // corpo/camisa branca
+      px(vx-4,vy+14,10,22,'#e8e8e8');
+      // gravata / peito
+      px(vx-1,vy+14,4,10,'#111');
+      // cabeça pálida (Nosferatu)
+      px(vx-6,vy+2,14,14,'#d4c8b0');
+      // olhos vermelhos e fundos
+      px(vx-4,vy+5,3,3,'#cc0000'); px(vx+3,vy+5,3,3,'#cc0000');
+      ctx.fillStyle='#880000'; ctx.fillRect(vx-3,vy+6,2,2); ctx.fillRect(vx+4,vy+6,2,2);
+      // nariz longo e afilado (Nosferatu)
+      px(vx,vy+9,2,5,'#b8a898');
+      // boca com presas
+      px(vx-3,vy+13,8,2,'#8a0000');
+      px(vx-2,vy+13,2,4,'#f0f0f0'); px(vx+2,vy+13,2,4,'#f0f0f0'); // presas
+      // sangue escorrendo da boca
+      ctx.fillStyle='#cc0000'; ctx.fillRect(vx-1,vy+15,2,5); ctx.fillRect(vx+3,vy+15,1,4);
+      // orelhas pontudas
+      px(vx-8,vy+2,4,6,'#d4c8b0'); px(vx+6,vy+2,4,6,'#d4c8b0');
+      // cabelo preto liso
+      px(vx-7,vy,16,6,'#0a0a0a');
+      px(vx-6,vy+1,5,5,'#111'); px(vx+3,vy+1,5,5,'#111'); // laterais
+      // braços levantados com capa (ameaçador)
+      ctx.fillStyle='#0a0010';
+      ctx.beginPath(); ctx.moveTo(vx-4,vy+18); ctx.lineTo(vx-28,vy+8); ctx.lineTo(vx-18,vy+30); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(vx+6,vy+18); ctx.lineTo(vx+30,vy+6); ctx.lineTo(vx+20,vy+28); ctx.closePath(); ctx.fill();
+      // mãos com garras
+      ctx.fillStyle='#c8bc9a';
+      ctx.fillRect(vx-29,vy+6,4,5); ctx.fillRect(vx-30,vy+5,2,2); ctx.fillRect(vx-28,vy+4,2,2);
+      ctx.fillRect(vx+27,vy+4,4,5); ctx.fillRect(vx+30,vy+3,2,2); ctx.fillRect(vx+28,vy+2,2,2);
+      // sombra dramática no chão
+      ctx.fillStyle='rgba(0,0,0,0.5)';
+      ctx.beginPath(); ctx.ellipse(vx+1,SY+SH-4,18,5,0,0,Math.PI*2); ctx.fill();
+      // título NOSFERATU piscando
+      if(Math.floor(Date.now()/700)%2===0){
+        ctx.fillStyle='rgba(200,0,0,0.95)'; ctx.font='bold 8px "Courier New"'; ctx.textAlign='center';
+        ctx.fillText('N O S F E R A T U',W/2,SY+SH-4);
+      }
+      ctx.textAlign='left';
+      // borda da tela (mais espessa e brilhante)
+      ctx.strokeStyle='#6644aa'; ctx.lineWidth=3; ctx.strokeRect(SX,SY,SW,SH);
+      ctx.strokeStyle='rgba(180,140,255,0.4)'; ctx.lineWidth=1; ctx.strokeRect(SX-1,SY-1,SW+2,SH+2);
+      ctx.restore();
+      // glow forte da tela sobre a plateia
+      const glowGrad=ctx.createLinearGradient(W/2,SY+SH,W/2,SY+SH+55);
+      glowGrad.addColorStop(0,'rgba(120,70,220,0.28)'); glowGrad.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.fillStyle=glowGrad; ctx.fillRect(SX,SY+SH,SW,55);
+      // CADEIRAS — 5 fileiras, 9 por fileira
+      for(let r=0;r<5;r++) for(let c=0;c<9;c++){
+        const sx=24+c*48, sy=76+r*26;
+        const isUs=(r===4&&(c===4||c===5));
+        ctx.fillStyle=isUs?'#551133':'#1a000d'; ctx.fillRect(sx,sy,18,20);
+        ctx.fillStyle=isUs?'#881144':'#2a0016'; ctx.fillRect(sx,sy,18,6);
+        // pessoa sentada (silhueta de cabeça)
+        if(!isUs || r<4){
+          const headH = 5+Math.floor(c*r*0.3)%4; // variação de altura
+          ctx.fillStyle='#0a0008'; ctx.fillRect(sx+2,sy-headH-3,14,headH+4);
+        }
+      }
+      // pessoas com reações de terror nas fileiras do meio
+      // pessoa cobrindo os olhos (fileira 2, col 2)
+      ctx.fillStyle='#0a0008'; ctx.fillRect(120-4,100,22,12); // cabeça
+      ctx.fillStyle='#2a1a00'; ctx.fillRect(118,103,6,4); ctx.fillRect(128,103,6,4); // mãos sobre os olhos
+      // pessoa agarrando o apoio de braço (fileira 3, col 6)
+      ctx.fillStyle='#2a1a00'; ctx.fillRect(306,115,4,8); // braço apertando
+      // Chef e Mrs.Puff na última fileira
+      drawChef(213,128,1,0);
+      drawMrsPuff(265,126,0);
+      drawFHearts();
+      // quiz panel
+      if(phase==='quiz'||phase==='outro'){
+        const q=QS[Math.min(qi,QS.length-1)];
+        ctx.fillStyle='rgba(6,3,18,.96)'; ctx.fillRect(10,153,W-20,H-163);
+        ctx.strokeStyle=C.purp; ctx.lineWidth=2; ctx.strokeRect(10,153,W-20,H-163);
+        ctx.fillStyle=C.pink2; ctx.font='10px "Courier New"'; ctx.textAlign='center';
+        // wrap
+        const qw=q.q, qparts=[];
+        ctx.font='10px "Courier New"';
+        let cur='', qwords=qw.split(' ');
+        for(let w of qwords){ const t2=cur+(cur?' ':'')+w; if(ctx.measureText(t2).width>W-50){qparts.push(cur);cur=w;}else cur=t2;}
+        qparts.push(cur);
+        for(let i=0;i<Math.min(qparts.length,2);i++) ctx.fillText(qparts[i],W/2,167+i*13);
+        ctx.textAlign='left';
+        for(let i=0;i<q.opts.length;i++){
+          const oy=194+i*21, isSel=sel===i;
+          const isWrong=wrongAns&&isSel;
+          const bgc = answered&&isSel?C.purp2 : isWrong?'#4a0000' : isSel?C.purp:'#1a0a2a';
+          ctx.fillStyle=bgc; ctx.fillRect(18,oy,W-36,17);
+          ctx.strokeStyle=isWrong?C.red : isSel?C.purp:'#330055'; ctx.lineWidth=1; ctx.strokeRect(18,oy,W-36,17);
+          ctx.fillStyle=isSel?C.white:'#aaa'; ctx.font='9px "Courier New"';
+          ctx.fillText(`${'ABCD'[i]}) ${q.opts[i]}`,26,oy+12);
+        }
+        if(answered){
+          ctx.fillStyle='rgba(6,3,18,.95)'; ctx.fillRect(10,H-30,W-20,26);
+          ctx.fillStyle=C.gold; ctx.font='10px "Courier New"'; ctx.textAlign='center';
+          ctx.fillText(q.resp[q.correct],W/2,H-14);
+          ctx.textAlign='left';
+        } else if(wrongAns){
+          ctx.fillStyle='rgba(80,0,0,.95)'; ctx.fillRect(10,H-30,W-20,26);
+          ctx.fillStyle=C.red; ctx.font='10px "Courier New"'; ctx.textAlign='center';
+          ctx.fillText('Errado! Pensa melhor e tente de novo...', W/2,H-14);
+          ctx.textAlign='left';
+        } else {
+          ctx.fillStyle='rgba(255,107,157,.5)'; ctx.font='9px "Courier New"'; ctx.textAlign='center';
+          ctx.fillText('↑↓ escolher  ·  ESPAÇO confirmar',W/2,H-8);
+          ctx.textAlign='left';
+        }
+      }
+      drawDialog();
+    },
+    onKey(code){
+      if(phase!=='quiz'||answered||wrongAns) return;
+      if(code==='Space'||code==='Enter'){
+        if(sel===QS[qi].correct){ SFX.success(); answered=true; ansT=0; for(let i=0;i<4;i++) spawnHeart(); }
+        else { SFX.error(); wrongAns=true; wrongT=0; }
+      }
+    }
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FASE 4 — PRAIA DE SANTA CLARA (Dodge + Coleta)
+// ═══════════════════════════════════════════════════════════════
+function createBeach(skipIntro=false) {
+  let phase='dialog', t=0, frame=0, dir=1;
+  let px2=W/2, score=0, lives=3, target=8;
+  let waves=[], items=[], wt=0, it=0;
+  let won=false, over=false, endT=0;
+
+  function spW(){ waves.push({x:Math.random()*(W-60)+10, y:-20, vy:1.8+Math.random()*2.2, w:38+Math.random()*36, danger:Math.random()<.58}); }
+  function spI(){ items.push({x:Math.random()*(W-50)+15, y:-14, vy:.8+Math.random()*.8}); }
+
+  if(skipIntro) {
+    phase='game';
+  } else {
+    showDialog([
+      'Praia de Santa Clara. Brisa do mar. Pôr do sol.',
+      'Ela te trouxe para o lugar mais especial dela.',
+      'Desvie das ondas vermelhas e colete os bagres!',
+      '← → para mover. Boa sorte! 🌊',
+    ], ()=>{ phase='game'; });
+  }
+
+  return {
+    update(){
+      t++;
+      if(phase==='dialog'){ updateDialog(); return; }
+      if(phase==='outro'){ updateDialog(); return; }
+      frame+=.1;
+      if(keys['ArrowLeft']||keys['KeyA']){ px2-=3; dir=-1; }
+      if(keys['ArrowRight']||keys['KeyD']){ px2+=3; dir=1; }
+      px2=Math.max(12,Math.min(W-12,px2));
+      if(!won&&!over){
+        wt++; if(wt%36===0) spW();
+        it++; if(it%65===0) spI();
+        const py=H-55;
+        for(let w of waves){
+          w.y+=w.vy;
+          if(w.danger&&w.y+18>py-18&&w.y<py+10&&Math.abs(px2-(w.x+w.w/2))<w.w/2+8){
+            SFX.hit();
+            lives--; w.y=H+50;
+            if(lives<=0){ over=true; endT=0; }
+          }
+        }
+        waves=waves.filter(w=>w.y<H+30);
+        for(let it2 of items){
+          it2.y+=it2.vy;
+          if(it2.y+10>py-18&&it2.y<py+10&&Math.abs(px2-it2.x)<14){
+            SFX.collect();
+            score++; it2.y=H+50; for(let i=0;i<2;i++) spawnHeart(it2.x,py);
+            if(score>=target){ SFX.success(); won=true; endT=0; }
+          }
+        }
+        items=items.filter(i=>i.y<H+30);
+      } else {
+        endT++;
+        if(over&&endT>80){ over=false; waves=[]; items=[]; score=0; lives=3; endT=0; }
+        if(won&&endT===50){
+          showDialog([
+            '"Santa Clara. O lugar mais especial dela — e agora nosso."',
+            '"Cada onda que passou, a gente superou junto."',
+            'Fase 4 concluída! Última parada: Calebito! 🍦',
+          ], ()=>fadeToScene(()=>createLocCard(4)));
+          phase='outro';
+        }
+      }
+      updateFHearts();
+    },
+    draw(){
+      // céu degradê pôr do sol
+      const sg=ctx.createLinearGradient(0,0,0,H*.52);
+      sg.addColorStop(0,'#ff7744'); sg.addColorStop(.4,'#ffaa55'); sg.addColorStop(1,'#87ceeb');
+      ctx.fillStyle=sg; ctx.fillRect(0,0,W,H*.52);
+      // nuvens cor de rosa do pôr do sol
+      function sunCloud(cx,cy,s){
+        ctx.fillStyle='rgba(255,180,140,.7)';
+        ctx.fillRect(cx,cy,s*2,s*.6); ctx.fillRect(cx+s*.3,cy-s*.35,s*1.5,s*.6); ctx.fillRect(cx+s*.1,cy-s*.15,s*1.8,s*.25);
+      }
+      sunCloud(30,22,20); sunCloud(180,14,16); sunCloud(310,28,18);
+      // gaivota 1
+      const gx1=((t*0.6)%520)-20, gy1=30+Math.sin(t*.03)*8;
+      ctx.strokeStyle='#1a1a2a'; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.moveTo(gx1,gy1); ctx.quadraticCurveTo(gx1+8,gy1-5,gx1+16,gy1); ctx.stroke();
+      // gaivota 2
+      const gx2=((t*0.4+200)%540)-20, gy2=18+Math.sin(t*.025+1)*6;
+      ctx.beginPath(); ctx.moveTo(gx2,gy2); ctx.quadraticCurveTo(gx2+7,gy2-4,gx2+14,gy2); ctx.stroke();
+      // sol se pondo
+      const sunG=ctx.createRadialGradient(390,58,0,390,58,35);
+      sunG.addColorStop(0,'#ffffaa'); sunG.addColorStop(.4,'#ffcc22'); sunG.addColorStop(1,'rgba(255,140,0,0)');
+      ctx.fillStyle=sunG; ctx.beginPath(); ctx.arc(390,58,35,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#ffcc22'; ctx.beginPath(); ctx.arc(390,58,22,0,Math.PI*2); ctx.fill();
+      // reflexo do sol na água
+      for(let i=0;i<8;i++) { ctx.fillStyle=`rgba(255,200,80,${.18-i*.02})`; ctx.fillRect(375-i*6,H*.42+i*3,30+i*8,3); }
+
+      // ── MAR ──
+      const seaY=H*.43;
+      // camada de fundo (mais escura)
+      ctx.fillStyle='#0d5a88'; ctx.fillRect(0,seaY,W,H-seaY);
+      // camada intermediária
+      ctx.fillStyle='#1570aa'; ctx.fillRect(0,seaY,W,(H-seaY)*.6);
+      // superfície
+      ctx.fillStyle='#2288bb'; ctx.fillRect(0,seaY,W,10);
+      // ondas animadas múltiplas camadas
+      for(let layer=0;layer<3;layer++){
+        const speed=1+layer*.5, off=layer*13;
+        ctx.fillStyle=`rgba(255,255,255,${.08+layer*.04})`;
+        for(let wx=0;wx<W;wx+=50){
+          const wave=Math.sin((t*speed*.04)+(wx+off)*.18)*5;
+          ctx.fillRect(wx+wave,seaY+8+layer*6,32,3);
+        }
+      }
+
+      // ── ZONA SUBMARINA (visível acima da areia) ──
+      ctx.fillStyle='rgba(0,60,100,.35)'; ctx.fillRect(0,H-100,W,40);
+      // peixes nadando no fundo
+      function drawFish(fx,fy,clr,sc,spd){
+        const xx=((fx+t*spd)%W+W)%W;
+        ctx.save(); ctx.translate(xx,fy+Math.sin(t*.05+fx)*.3*5);
+        if(spd<0) ctx.scale(-sc,sc); else ctx.scale(sc,sc);
+        ctx.fillStyle=clr;
+        ctx.beginPath(); ctx.ellipse(0,0,8,4,0,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle=clr;
+        ctx.beginPath(); ctx.moveTo(7,0); ctx.lineTo(12,-4); ctx.lineTo(12,4); ctx.closePath(); ctx.fill();
+        ctx.fillStyle='rgba(0,0,0,.4)'; ctx.fillRect(-2,-2,3,4);
+        ctx.fillStyle='#fff'; ctx.fillRect(-2,-2,1,2);
+        ctx.fillStyle='rgba(255,255,255,.3)';
+        ctx.beginPath(); ctx.ellipse(-2,-1,2,1.5,-.3,0,Math.PI*2); ctx.fill();
+        ctx.restore();
+      }
+      drawFish(20,H-88,'#ff8844',1,0.8);
+      drawFish(100,H-82,'#4488ff',1,0.6);
+      drawFish(220,H-90,'#ffcc22',.9,-0.7);
+      drawFish(310,H-85,'#44cc88',1,0.5);
+      drawFish(380,H-92,'#ff6699',.8,-0.9);
+      drawFish(60,H-78,'#cc44ff',.7,1.1);
+      // bolhas subindo
+      for(let b=0;b<6;b++){
+        const bx=(b*73+t*.5)%W, by=H-70-((t*.8+b*30)%40);
+        ctx.strokeStyle='rgba(150,220,255,.5)'; ctx.lineWidth=.8;
+        ctx.beginPath(); ctx.arc(bx,by,2+b%2,0,Math.PI*2); ctx.stroke();
+      }
+      // alga marinha
+      for(let a=0;a<5;a++){
+        const ax=50+a*90;
+        ctx.strokeStyle='#116633'; ctx.lineWidth=2;
+        ctx.beginPath(); ctx.moveTo(ax,H-62);
+        ctx.bezierCurveTo(ax+Math.sin(t*.04+a)*6,H-75, ax-Math.sin(t*.04+a)*6,H-82, ax+Math.sin(t*.04+a)*4,H-92);
+        ctx.stroke();
+      }
+      // estrela-do-mar na areia
+      function starfish(sx,sy){
+        ctx.fillStyle='#ff7744';
+        for(let arm=0;arm<5;arm++){
+          const ang=arm*(Math.PI*2/5)-Math.PI/2;
+          ctx.save(); ctx.translate(sx,sy); ctx.rotate(ang);
+          ctx.beginPath(); ctx.ellipse(0,-5,2,5,0,0,Math.PI*2); ctx.fill();
+          ctx.restore();
+        }
+        ctx.fillStyle='#ff9966'; ctx.beginPath(); ctx.arc(sx,sy,3,0,Math.PI*2); ctx.fill();
+      }
+      starfish(55,H-66); starfish(180,H-64); starfish(380,H-67);
+
+      // ── AREIA ──
+      ctx.fillStyle=C.sand; ctx.fillRect(0,H-65,W,65);
+      ctx.fillStyle=C.sand2; ctx.fillRect(0,H-67,W,5);
+      // texturas de areia
+      for(let sx=10;sx<W;sx+=18){ ctx.fillStyle='rgba(150,100,40,.1)'; ctx.fillRect(sx+(sx%36),H-62,6,2); }
+      // conchas na areia
+      for(let sh=0;sh<4;sh++){
+        const shx=80+sh*100;
+        ctx.fillStyle='#e8d0b8';
+        ctx.beginPath(); ctx.ellipse(shx,H-63,5,3,-.3,0,Math.PI*2); ctx.fill();
+        ctx.strokeStyle='#c8a888'; ctx.lineWidth=.5;
+        ctx.beginPath(); ctx.arc(shx,H-63,4,Math.PI,.0); ctx.stroke();
+      }
+
+      // ── COQUEIROS ──
+      function palm(x){
+        // tronco curvado
+        ctx.strokeStyle=C.brown; ctx.lineWidth=5;
+        ctx.beginPath(); ctx.moveTo(x,H-62); ctx.bezierCurveTo(x+5,H-90,x-5,H-110,x+2,H-125); ctx.stroke();
+        ctx.strokeStyle='#6a3a1c'; ctx.lineWidth=3;
+        ctx.beginPath(); ctx.moveTo(x,H-62); ctx.bezierCurveTo(x+5,H-90,x-5,H-110,x+2,H-125); ctx.stroke();
+        // folhas
+        for(let a=-1;a<=1;a++){
+          ctx.save(); ctx.translate(x+2,H-125); ctx.rotate(a*.5);
+          ctx.fillStyle='#228833'; ctx.beginPath();
+          ctx.moveTo(0,0); ctx.quadraticCurveTo(10,-8,22,-4); ctx.quadraticCurveTo(10,-2,0,0); ctx.fill();
+          ctx.fillStyle='#33aa44'; ctx.fillRect(-1,-2,8,2);
+          ctx.restore();
+        }
+        // cocos
+        ctx.fillStyle='#5a3010';
+        ctx.beginPath(); ctx.arc(x+4,H-126,4,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(x-2,H-128,3,0,Math.PI*2); ctx.fill();
+      }
+      palm(22); palm(W-44); palm(W/2-10);
+      // waves
+      for(let w of waves){
+        ctx.fillStyle=w.danger?'rgba(255,50,50,.65)':'rgba(68,170,200,.55)';
+        ctx.beginPath(); ctx.ellipse(w.x+w.w/2,w.y+9,w.w/2,9,0,0,Math.PI*2); ctx.fill();
+        if(w.danger){
+          ctx.fillStyle='rgba(255,255,255,.9)'; ctx.font='11px serif'; ctx.textAlign='center';
+          ctx.fillText('!',w.x+w.w/2,w.y+13); ctx.textAlign='left';
+        }
+      }
+      // items — bagres mortos
+      for(let i of items){
+        const bx=i.x, by=i.y;
+        // corpo do bagre (cinza azulado)
+        ctx.fillStyle='#7a8a9a';
+        ctx.beginPath(); ctx.ellipse(bx,by,10,5,0.3,0,Math.PI*2); ctx.fill();
+        // barriga mais clara
+        ctx.fillStyle='#aabbc0';
+        ctx.beginPath(); ctx.ellipse(bx+1,by+1,7,3,0.3,0,Math.PI*2); ctx.fill();
+        // cauda
+        ctx.fillStyle='#6a7a8a';
+        ctx.beginPath(); ctx.moveTo(bx+9,by-2); ctx.lineTo(bx+15,by-5); ctx.lineTo(bx+15,by+2); ctx.closePath(); ctx.fill();
+        // cabeça / boca
+        ctx.fillStyle='#5a6a7a';
+        ctx.beginPath(); ctx.ellipse(bx-8,by,5,4,0,0,Math.PI*2); ctx.fill();
+        // bigodinho (barbatanas da boca)
+        ctx.strokeStyle='#333'; ctx.lineWidth=1;
+        ctx.beginPath(); ctx.moveTo(bx-12,by-1); ctx.lineTo(bx-16,by-3); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(bx-12,by+1); ctx.lineTo(bx-16,by+3); ctx.stroke();
+        // olho morto (X)
+        ctx.fillStyle='#fff'; ctx.fillRect(bx-10,by-2,4,3);
+        ctx.strokeStyle='#f00'; ctx.lineWidth=1;
+        ctx.beginPath(); ctx.moveTo(bx-10,by-2); ctx.lineTo(bx-7,by+1); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(bx-7,by-2); ctx.lineTo(bx-10,by+1); ctx.stroke();
+        // barbatana dorsal
+        ctx.fillStyle='#6a7a8a';
+        ctx.beginPath(); ctx.moveTo(bx-4,by-5); ctx.lineTo(bx,by-8); ctx.lineTo(bx+4,by-5); ctx.closePath(); ctx.fill();
+      }
+      drawFHearts();
+      drawChef(px2,H-55,dir,frame);
+      // hud
+      ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(8,8,200,22);
+      ctx.fillStyle=C.white; ctx.font='11px "Courier New"';
+      ctx.fillText(`🐟 ${score}/${target}   VIDAS: ${'♥'.repeat(lives)+'♡'.repeat(3-lives)}`,14,23);
+      if(over){
+        ctx.fillStyle='rgba(0,0,0,.7)'; ctx.fillRect(0,0,W,H);
+        ctx.fillStyle=C.red; ctx.textAlign='center'; ctx.font='bold 18px "Courier New"';
+        ctx.fillText('Uma onda te pegou!',W/2,H/2-8);
+        ctx.fillStyle=C.white; ctx.font='11px "Courier New"';
+        ctx.fillText('Recomeçando...',W/2,H/2+14); ctx.textAlign='left';
+      }
+      if(won){
+        ctx.fillStyle=C.gold; ctx.textAlign='center'; ctx.font='bold 15px "Courier New"';
+        ctx.fillText('✨ Fase Completa! ✨',W/2,H*.38); ctx.textAlign='left';
+      }
+      drawDialog();
+    },
+    onKey(){}
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// FASE 5 — CALEBITO (Escolha o Nero)
+// ═══════════════════════════════════════════════════════════════
+function createIceCream(skipIntro=false) {
+  let phase='dialog', t=0, sel=0, revealed=false, revT=0;
+  let shuffleT=0, shuffleFlash=0;
+  const BASE_FLAVORS=[
+    {name:'Nero',           color:'#1a1a1a', special:true },
+    {name:'Ninho\nc/Morango',color:'#f5c8a0', special:false},
+    {name:'Tropicana',      color:'#ff9918', special:false},
+    {name:'Frutas\nVerm.',  color:'#bb1a3a', special:false},
+    {name:'Choc.\nBelga',   color:'#2a0e06', special:false},
+  ];
+  let FLAVORS=[...BASE_FLAVORS];
+  function shuffle(){
+    // Fisher-Yates shuffle
+    for(let i=FLAVORS.length-1;i>0;i--){
+      const j=Math.floor(Math.random()*(i+1));
+      [FLAVORS[i],FLAVORS[j]]=[FLAVORS[j],FLAVORS[i]];
+    }
+    sel=0; shuffleFlash=40;
+  }
+
+  if(skipIntro) {
+    phase='game';
+  } else {
+    showDialog([
+      'Calebito. O lugar que virou o sorvete dos dois.',
+      'Ela sempre pede o mesmo sabor. Você sabe qual é.',
+      'Encontre o sabor favorito dela no balcão!',
+      '← → ↑ ↓ para escolher,  ESPAÇO para confirmar.',
+    ], ()=>{ phase='game'; });
+  }
+
+  return {
+    update(){
+      t++;
+      if(phase==='dialog'){ updateDialog(); return; }
+      if(phase==='outro'){ updateDialog(); return; }
+      if(!revealed){
+        shuffleT++; if(shuffleT>=600){ shuffleT=0; shuffle(); } // embaralha a cada 10s
+        if(shuffleFlash>0) shuffleFlash--;
+        if(justPressed['ArrowLeft']||justPressed['KeyA'])  sel=(sel+4)%5;
+        if(justPressed['ArrowRight']||justPressed['KeyD']) sel=(sel+1)%5;
+        if(justPressed['ArrowUp']||justPressed['KeyW'])    sel=(sel+3)%5;
+        if(justPressed['ArrowDown']||justPressed['KeyS'])  sel=(sel+3)%5;
+      } else {
+        revT++;
+        if(revT===55){
+          if(FLAVORS[sel].special){
+            showDialog([
+              '"Nero. O favorito dela sempre."',
+              '"Talvez porque esconde toda a doçura do mundo lá dentro."',
+              'Fase 5 concluída! Mas a aventura não acabou...',
+            ], ()=>fadeToScene(()=>createLocCard(5)));
+            phase='outro';
+          } else {
+            revealed=false; revT=0;
+          }
+        }
+      }
+      updateFHearts();
+    },
+    draw(){
+      // parede com papel de parede listrado verde claro
+      px(0,0,W,H,'#f0fff4');
+      for(let i=0;i<W;i+=14){ ctx.fillStyle=`rgba(40,180,80,${i%28===0?.07:.03})`; ctx.fillRect(i,0,6,H); }
+
+      // ── FAIXA DO TETO ──
+      px(0,0,W,18,'#22aa44');
+      for(let i=0;i<W;i+=26){
+        ctx.fillStyle='#44cc66'; ctx.beginPath(); ctx.arc(i+13,9,7,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle=C.white; ctx.beginPath(); ctx.arc(i+13,9,3,0,Math.PI*2); ctx.fill();
+      }
+
+      // ── PLACA CALEBITO (grande, chamativa) ──
+      px(W/2-85,22,170,42,'#1a9a38');
+      px(W/2-83,23,166,40,'#2abb50');
+      ctx.fillStyle='rgba(255,255,255,.15)'; ctx.fillRect(W/2-83,23,166,14);
+      ctx.fillStyle=C.white; ctx.font='bold 20px "Courier New"'; ctx.textAlign='center';
+      ctx.fillText('CALEBITO',W/2,47);
+      ctx.fillStyle='#c8ffe0'; ctx.font='7px "Courier New"';
+      ctx.fillText('★  SORVETERIA ARTESANAL  ★',W/2,60); ctx.textAlign='left';
+      // balões decorativos
+      for(let b=0;b<4;b++){
+        const bx=25+b*140, bc=['#ff4466','#ffaa00','#44aaff','#aa44ff'][b];
+        ctx.fillStyle=bc; ctx.beginPath(); ctx.arc(bx,H*.3+Math.sin(t*.03+b)*4,10,0,Math.PI*2); ctx.fill();
+        ctx.strokeStyle='rgba(0,0,0,.2)'; ctx.lineWidth=1;
+        ctx.beginPath(); ctx.moveTo(bx,H*.3+10+Math.sin(t*.03+b)*4); ctx.lineTo(bx+2,H*.3+30); ctx.stroke();
+        // brilho no balão
+        ctx.fillStyle='rgba(255,255,255,.3)'; ctx.beginPath(); ctx.arc(bx-3,H*.3-3+Math.sin(t*.03+b)*4,3,0,Math.PI*2); ctx.fill();
+      }
+
+      // ── CARDÁPIO NA PAREDE ──
+      px(W-115,22,105,86,'#f0fff4');
+      ctx.strokeStyle='#22aa44'; ctx.lineWidth=1.5; ctx.strokeRect(W-115,22,105,86);
+      ctx.fillStyle='#1a8832'; ctx.font='bold 8px "Courier New"'; ctx.textAlign='center';
+      ctx.fillText('CARDÁPIO',W-62,36);
+      px(W-110,38,95,1.5,'#88cc88');
+      ctx.fillStyle='#333'; ctx.font='7px "Courier New"'; ctx.textAlign='left';
+      const menu=[['Nero','R$8'],['Ninho c/Mor.','R$9'],['Tropicana','R$8'],['Frutas Verm.','R$9'],['Choc. Belga','R$10']];
+      menu.forEach(([n,p],i)=>{ ctx.fillText(n,W-110,50+i*11); ctx.textAlign='right'; ctx.fillText(p,W-18,50+i*11); ctx.textAlign='left'; });
+
+      // ── VITRINE DE SORVETES no balcão ──
+      px(0,H-115,W,22,'#aaddee'); // vitrine vidro
+      px(0,H-115,W,2,'#cceeFF');
+      ctx.fillStyle='rgba(200,240,255,.3)'; ctx.fillRect(0,H-115,W,22);
+      // bolinhas de sorvete dentro da vitrine (5 sabores)
+      const vColors=['#1a1a1a','#f5c8a0','#ff9918','#bb1a3a','#2a0e06'];
+      const vLabels=['Nero','Ninho','Tropicana','F.Verm.','Ch.Belga'];
+      for(let v=0;v<5;v++){
+        const vx=46+v*82;
+        ctx.fillStyle=vColors[v]; ctx.beginPath(); ctx.arc(vx,H-108,12,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='rgba(255,255,255,.2)'; ctx.beginPath(); ctx.arc(vx-4,H-113,4,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#555'; ctx.font='6px "Courier New"'; ctx.textAlign='center';
+        ctx.fillText(vLabels[v],vx,H-92); ctx.textAlign='left';
+      }
+
+      // ── BALCÃO ──
+      px(0,H-95,W,95,'#f5e8d8');
+      px(0,H-98,W,5,'#e0c8a8');
+
+      // ── FUNCIONÁRIO pixel art ──
+      // uniforme: avental branco, touca rosa
+      const ef=Math.floor(t/25)%2; // frame de trabalho (mexendo sorvete)
+      px(W-95,H-148,16,42,'#fff'); // corpo/avental
+      px(W-98,H-148,6,28,'#fff'); // braço esq
+      px(W-79,H-148,6,28,'#fff');
+      px(W-95,H-148,16,6,'#aaddaa'); // pescoço/gola
+      // braço mexendo sorvete (animado)
+      px(W-100,H-142+ef*4,8,5,'#fff');
+      // cabeça
+      px(W-93,H-162,14,14,C.skin);
+      // touca verde
+      px(W-94,H-170,16,12,'#22aa44');
+      px(W-97,H-162,20,5,'#22aa44');
+      // olhos
+      px(W-89,H-157,2,2,'#333'); px(W-83,H-157,2,2,'#333');
+      // sorriso
+      px(W-88,H-152,6,1,'#cc3344');
+      // pernas
+      px(W-92,H-108,6,12,'#444'); px(W-84,H-108,6,12,'#444');
+      px(W-93,H-98,8,3,C.white); px(W-85,H-98,8,3,C.white);
+      // colher na mão
+      ctx.strokeStyle='#aaa'; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.moveTo(W-102,H-142+ef*4); ctx.lineTo(W-110,H-130+ef*4); ctx.stroke();
+      ctx.fillStyle='#bbb'; ctx.beginPath(); ctx.arc(W-111,H-129+ef*4,3,0,Math.PI*2); ctx.fill();
+
+      // ── CLIENTES sentados ──
+      // mesa 1 (casal)
+      px(30,H-88,36,4,'#d4aa80'); // mesa
+      px(20,H-84,14,18,'#555'); px(50,H-84,14,18,'#555'); // banquinhos
+      // cliente 1 (sentado)
+      px(22,H-108,10,20,'#3355aa'); px(23,H-118,8,10,C.skin); px(22,H-122,10,5,'#331a00');
+      // cliente 2 (sentado)
+      px(52,H-108,10,20,'#aa3355'); px(53,H-118,8,10,C.skin); px(52,H-122,10,5,'#553300');
+      // sorvetes na mesa
+      ctx.fillStyle='#ff6688'; ctx.beginPath(); ctx.arc(36,H-96,5,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#1a1a1a'; ctx.beginPath(); ctx.arc(44,H-96,5,0,Math.PI*2); ctx.fill();
+
+      // painel de seleção legível
+      const selectedName = FLAVORS[sel].name.replace('\n',' ');
+      px(110,H-134,270,26,'rgba(18,80,42,.92)');
+      ctx.strokeStyle=FLAVORS[sel].special?C.gold:'#55dd77'; ctx.lineWidth=2; ctx.strokeRect(110,H-134,270,26);
+      ctx.fillStyle='rgba(255,255,255,.12)'; ctx.fillRect(112,H-132,266,8);
+      ctx.textAlign='center';
+      ctx.fillStyle='#c8ffe0'; ctx.font='bold 7px "Courier New"';
+      ctx.fillText('SABOR SELECIONADO',245,H-123);
+      ctx.fillStyle=C.white; ctx.font='bold 12px "Courier New"';
+      ctx.fillText(selectedName,245,H-111);
+      ctx.textAlign='left';
+
+      // ── GRID DE SABORES ──
+      for(let i=0;i<FLAVORS.length;i++){
+        const col=i%3, row=Math.floor(i/3);
+        const fx=55+col*132, fy=H-108+row*43;
+        const isSel=sel===i;
+        ctx.fillStyle=isSel?'#c8f0d0':'#e8e0d8'; ctx.fillRect(fx-32,fy,84,38);
+        ctx.strokeStyle=isSel?'#22aa44':'#ccc'; ctx.lineWidth=1; ctx.strokeRect(fx-32,fy,84,38);
+        // cone
+        ctx.fillStyle=C.sand;
+        ctx.beginPath(); ctx.moveTo(fx+10-12,fy+14); ctx.lineTo(fx+10+12,fy+14); ctx.lineTo(fx+10,fy+34); ctx.closePath(); ctx.fill();
+        ctx.fillStyle='#b8904a'; ctx.fillRect(fx+10-12,fy+12,24,4);
+        // casquinha (textura)
+        for(let cr=0;cr<3;cr++) ctx.fillRect(fx+10-10+cr*3,fy+14+cr*4,8-cr*2,2);
+        // scoop
+        ctx.fillStyle=FLAVORS[i].color;
+        ctx.beginPath(); ctx.arc(fx+10,fy+10,14,0,Math.PI*2); ctx.fill();
+        // brilho
+        ctx.fillStyle='rgba(255,255,255,.25)'; ctx.beginPath(); ctx.arc(fx+5,fy+5,5,0,Math.PI*2); ctx.fill();
+        if(FLAVORS[i].special){ // Nero: brilhos dourados
+          ctx.fillStyle='rgba(255,215,0,.2)'; ctx.beginPath(); ctx.arc(fx+10,fy+10,14,0,Math.PI*2); ctx.fill();
+        }
+        ctx.fillStyle=isSel?'rgba(20,120,50,.86)':'rgba(255,255,255,.76)';
+        ctx.fillRect(fx-30,fy+27,80,10);
+        ctx.fillStyle=isSel?C.white:'#444';
+        ctx.font=`${FLAVORS[i].special?'bold ':''}6px "Courier New"`;
+        ctx.textAlign='center';
+        ctx.fillText(FLAVORS[i].name.split('\n')[0],fx+10,fy+35);
+        ctx.textAlign='left';
+        if(isSel&&Math.floor(t/14)%2===0){
+          ctx.fillStyle=C.gold; ctx.fillRect(fx-30,fy-8,80,4);
+          ctx.fillRect(fx-30,fy-8,4,46); ctx.fillRect(fx+46,fy-8,4,46);
+        }
+        if(revealed&&i===sel){
+          ctx.font='15px serif'; ctx.textAlign='center';
+          ctx.fillText(FLAVORS[i].special?'✨':'✗',fx+10,fy-5); ctx.textAlign='left';
+        }
+      }
+      // timer de embaralhamento
+      if(!revealed){
+        const pct=shuffleT/600;
+        const BAR_MAX=W-130-40; // ends at x=330, before cardápio at W-115=365
+        const barW=Math.round(BAR_MAX*(1-pct));
+        px(40,72,BAR_MAX,5,'#333');
+        px(40,72,barW,5,pct>0.7?C.red:C.gold);
+        const secsLeft=Math.ceil((600-shuffleT)/60);
+        ctx.fillStyle=pct>0.7?C.red:'#666'; ctx.font='8px "Courier New"'; ctx.textAlign='center';
+        ctx.fillText(`sabores embaralham em ${secsLeft}s`,W/2,69); ctx.textAlign='left';
+        if(shuffleFlash>0){
+          ctx.fillStyle=`rgba(255,100,0,${shuffleFlash/40*0.45})`; ctx.fillRect(0,0,W,H);
+          ctx.fillStyle=C.white; ctx.font='bold 12px "Courier New"'; ctx.textAlign='center';
+          ctx.fillText('!! SABORES EMBARALHADOS !!',W/2,H/2-10); ctx.textAlign='left';
+        }
+      }
+      drawFHearts();
+      drawChef(32,H-75,1,t/30);
+      px(0,H-20,W,20,'rgba(0,0,0,.45)');
+      ctx.fillStyle=C.white; ctx.font='9px "Courier New"'; ctx.textAlign='center';
+      if(!revealed) ctx.fillText('← → ↑ ↓ escolher  ·  ESPAÇO confirmar',W/2,H-7);
+      ctx.textAlign='left';
+      drawDialog();
+    },
+    onKey(code){
+      if(phase!=='game'||revealed) return;
+      if(code==='Space'||code==='Enter'){
+        revealed=true; revT=0;
+        if(FLAVORS[sel].special) { SFX.success(); for(let i=0;i<10;i++) spawnHeart(); }
+        else { SFX.error(); for(let i=0;i<2;i++) spawnHeart(); }
+      }
+    }
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// FASE 6 — O DIA A DIA (Livros + Boss Bella)
+// ═══════════════════════════════════════════════════════════════
+function createDailyLife(skipIntro=false) {
+  let phase='dialog', t=0, frame=0;
+
+  // ── Puzzle dos livros ──
+  // índices: 0=Mulheres, 1=Factotum, 2=Misto Quente, 3=Pulp, 4=50 Tons (falso), 5=Crepúsculo (falso)
+  const ALL_TITLES=['Mulheres','Factotum','Misto\nQuente','Pulp','50 Tons\nde Cinza','Crepús-\nculo'];
+  const ALL_COLORS=['#cc3344','#3355cc','#33aa55','#9933cc','#888800','#336688'];
+  const IS_BUKO=[true,true,true,true,false,false];
+  // ordem exibida na prateleira: Crepúsculo, Misto Quente, Mulheres, 50 Tons, Pulp, Factotum
+  const bookDisp=[5,2,0,4,3,1];
+  // ordem correta dos índices reais: Mulheres(0), Factotum(1), Pulp(3), Misto Quente(2)
+  const CORRECT_SEQ=[0,1,3,2];
+  let bSel=0, picks=[], wrongFlash=false, wrongT=0, booksDone=false, wrongShake=0;
+
+  // ── Boss Bella ──
+  let px2=W/2, bellaX=-30, bellaSpeed=2.4, bellaDir=1;
+  let bellaState='run', bellaT=0, blocks=0, bLives=3, bossWon=false;
+  let warningBlink=0;
+  const breadX=W/2;
+  const breadHitRange=34;
+
+  function spawnBella(){
+    if(Math.random()<0.5){
+      bellaDir = -1;
+      bellaX = W+30;
+    } else {
+      bellaDir = 1;
+      bellaX = -30;
+    }
+    bellaState='run';
+  }
+
+  if(skipIntro) {
+    phase='books';
+  } else {
+    showDialog([
+      '"E agora... a fase mais difícil de todas."',
+      'O Dia a Dia.',
+      'Prova 1: ache os livros do Bukowski e ordene-os por ordem de preferência dela.',
+      'Cuidado: tem livro falso na prateleira!  ← → ↑ ↓ ESPAÇO',
+    ], ()=>{ phase='books'; });
+  }
+
+  return {
+    update(){
+      t++;
+      if(phase==='dialog'||phase==='outro'){ updateDialog(); return; }
+
+      if(phase==='books'){
+        if(booksDone){ updateDialog(); return; }
+        if(wrongT>0){ wrongT--; if(!wrongT) wrongFlash=false; }
+        if(wrongShake>0) wrongShake--;
+        if(justPressed['ArrowLeft']||justPressed['KeyA'])  bSel=Math.max(0,bSel-1);
+        if(justPressed['ArrowRight']||justPressed['KeyD']) bSel=Math.min(5,bSel+1);
+        if(justPressed['ArrowUp']||justPressed['KeyW'])    bSel=bSel>=3?bSel-3:bSel;
+        if(justPressed['ArrowDown']||justPressed['KeyS'])  bSel=bSel<3?bSel+3:bSel;
+      }
+
+      if(phase==='boss'){
+        frame+=.12;
+        if(keys['ArrowLeft']||keys['KeyA'])  px2=Math.max(12,px2-3.5);
+        if(keys['ArrowRight']||keys['KeyD']) px2=Math.min(W-12,px2+3.5);
+        warningBlink++;
+
+        if(bellaState==='run'&&!bossWon){
+          const prevX=bellaX;
+          bellaX += bellaSpeed * bellaDir;
+          // block: Chef na frente de Bella (colisão + anti-tunneling)
+          const dist=Math.abs(px2-bellaX);
+          const tunneled=bellaDir===1?(prevX<px2&&px2<=bellaX):(bellaX<=px2&&px2<prevX);
+          const nearBellaPath=Math.abs(px2-bellaX)<24||Math.abs(px2-prevX)<24;
+          if(dist<20||(tunneled&&nearBellaPath)){
+            SFX.block();
+            bellaState='blocked'; bellaT=0; blocks++;
+            bellaSpeed=Math.min(6.0,bellaSpeed+0.4);
+            for(let i=0;i<3;i++) spawnHeart(bellaX,H-85);
+            if(blocks>=6){ SFX.success(); bossWon=true; bellaT=0; }
+          }
+          // Bella chega ao pão central
+          if(bellaState==='run'&&((bellaDir===1&&bellaX>breadX-breadHitRange)||(bellaDir===-1&&bellaX<breadX+breadHitRange))){
+            SFX.hit();
+            bLives--; bellaSpeed=Math.min(6.0,bellaSpeed+0.3);
+            if(bLives<=0){ bLives=3; blocks=Math.max(0,blocks-1); }
+            spawnBella();
+          }
+        }
+        if(bellaState==='blocked'){
+          bellaT++; bellaX -= bellaDir*1.8; // recua na direção oposta
+          if(bellaT>50){ spawnBella(); }
+        }
+        if(bossWon){ bellaT++;
+          if(bellaT===80){
+            showDialog([
+              '"Bella tentou. Bella falhou."',
+              '"Mas o pão sobreviveu — dessa vez."',
+              'Você passou pela fase mais difícil, Chef. ♥',
+              'Fase 6 concluída! Agora sim... o final.',
+            ], ()=>fadeToScene(createFinal));
+            phase='outro';
+          }
+        }
+      }
+      updateFHearts();
+    },
+
+    draw(){
+      px(0,0,W,H,'#f0e6d0');
+      px(0,H-48,W,48,'#c4a870');
+      px(0,H-52,W,5,'#a08050');
+      px(0,H-52,W,3,'#d4b880');
+
+      if(phase==='books'){
+        const sx=wrongShake>0?Math.round(Math.sin(wrongShake*1.5)*5):0;
+        // quadro na parede acima da estante
+        px(120+sx,6,220,30,'#c8a870'); px(124+sx,8,212,26,'#4a6080');
+        ctx.fillStyle='#8ab0d0'; ctx.font='bold 9px "Courier New"'; ctx.textAlign='center';
+        ctx.fillText('Estante de Livros',230+sx,26); ctx.textAlign='left';
+        // estante (3 prateleiras para 6 livros)
+        px(16+sx,40,W-32,178,'#7a4e2a');
+        px(16+sx,40,W-32,10,'#5a3010');
+        px(16+sx,215,W-32,8,'#5a3010');
+        px(16+sx,120,W-32,7,'#5a3010'); // prateleira do meio
+        for(let g=0;g<4;g++){ ctx.fillStyle='rgba(0,0,0,.06)'; ctx.fillRect(16+sx+g*110,42,3,176); }
+        // 6 livros em duas fileiras (3+3)
+        for(let i=0;i<6;i++){
+          const row=Math.floor(i/3), col=i%3;
+          const bi=bookDisp[i];
+          const bx=30+sx+col*148, by=48+row*74;
+          const bw=60, bh=IS_BUKO[bi]?60:50;
+          const byAdj=by+(60-bh);
+          const isPicked=picks.includes(i);
+          const isSel=bSel===i&&!booksDone;
+          const pOrder=picks.indexOf(i);
+          // livro falso tem aparência gasta / desbotada
+          ctx.fillStyle=isPicked?'#555':ALL_COLORS[bi];
+          ctx.globalAlpha=IS_BUKO[bi]?1.0:0.65;
+          ctx.fillRect(bx,byAdj,bw,bh);
+          ctx.globalAlpha=1.0;
+          ctx.fillStyle='rgba(255,255,255,.2)'; ctx.fillRect(bx,byAdj,8,bh); // lombada
+          ctx.fillStyle='rgba(0,0,0,.18)';     ctx.fillRect(bx+bw-8,byAdj,8,bh);
+          // folhas brancas (miolo do livro)
+          ctx.fillStyle='#f5f0e8'; ctx.fillRect(bx+bw-6,byAdj+2,5,bh-4);
+          ctx.fillStyle='rgba(0,0,0,.08)';
+          for(let pg=0;pg<5;pg++) ctx.fillRect(bx+bw-6,byAdj+2+pg*((bh-4)/5),5,1);
+          ctx.save(); ctx.fillStyle=isPicked?'#888':C.white;
+          ctx.font=`bold ${IS_BUKO[bi]?8:7}px "Courier New"`; ctx.textAlign='center';
+          ALL_TITLES[bi].split('\n').forEach((p,pi)=>ctx.fillText(p,bx+bw/2,byAdj+13+pi*11));
+          ctx.restore();
+          if(isSel){
+            ctx.strokeStyle=C.gold; ctx.lineWidth=2; ctx.strokeRect(bx-2,byAdj-2,bw+4,bh+4);
+            if(Math.floor(t/14)%2===0){ ctx.fillStyle=C.gold; ctx.font='10px monospace'; ctx.textAlign='center'; ctx.fillText('▲',bx+bw/2,byAdj-7); ctx.textAlign='left'; }
+          }
+          if(wrongFlash&&!picks.includes(i)){ ctx.fillStyle='rgba(255,0,0,.4)'; ctx.fillRect(bx,byAdj,bw,bh); }
+          if(pOrder!==-1){
+            ctx.fillStyle=C.gold; ctx.font='bold 11px "Courier New"'; ctx.textAlign='center';
+            ctx.fillText(pOrder+1+'.',bx+bw/2,byAdj+bh+14); ctx.textAlign='left';
+          }
+        }
+        // rodapé: fundo escuro para legibilidade
+        px(0,H-48,W,48,'rgba(0,0,0,.0)'); // já existe o chão
+        ctx.fillStyle='#3a2010'; ctx.font='bold 9px "Courier New"'; ctx.textAlign='center';
+        ctx.fillText('Qual a ordem dos favoritos do Bukowski dela?',W/2,H-34);
+        ctx.fillStyle='#6a4030'; ctx.font='7px "Courier New"';
+        ctx.fillText('← → ↑ ↓ navegar  ·  ESPAÇO confirmar  ·  livro errado = reinicia',W/2,H-22);
+        ctx.fillStyle='#3a2010'; ctx.font='bold 8px "Courier New"';
+        ctx.fillText(`Confirmados: ${picks.length} / 4`,W/2,H-10);
+        ctx.textAlign='left';
+        drawChef(22,H-75,1,t/30);
+      }
+
+      if(phase==='boss'){
+        // sofá (esquerda)
+        px(8,H-92,110,46,'#7744aa'); px(8,H-104,110,16,'#9966cc');
+        px(8,H-104,18,16,'#aa77dd'); px(100,H-104,18,16,'#aa77dd');
+        // mesa + pão central
+        px(breadX-42,H-88,84,10,'#8b5e3c');
+        px(breadX-42,H-98,84,14,'#c8a050');
+        px(breadX-20,H-112,40,16,'#d4a840');
+        px(breadX-16,H-120,32,10,'#e8c060');
+        px(breadX-13,H-123,26,6,'#f0d070');
+        ctx.fillStyle='#7a5010'; ctx.font='bold 8px "Courier New"'; ctx.textAlign='center';
+        ctx.fillText('PAO',breadX,H-99); ctx.textAlign='left';
+        if(Math.floor(warningBlink/18)%2===0){
+          ctx.fillStyle=C.red; ctx.font='bold 9px "Courier New"'; ctx.textAlign='center';
+          ctx.fillText('NAO DEIXA A BELLA COMER O PAO!!',W/2,H-128); ctx.textAlign='left';
+        }
+        // Bella (espelhada se vem da direita)
+        if(bellaDir===-1){
+          ctx.save(); ctx.translate(bellaX*2,0); ctx.scale(-1,1);
+          drawBella(bellaX,H-75,t);
+          ctx.restore();
+        } else {
+          drawBella(bellaX,H-75,t);
+        }
+        drawChef(px2,H-75,bellaDir===1?-1:1,frame);
+        if(bellaState==='blocked'){
+          ctx.fillStyle='rgba(255,255,255,.92)'; ctx.fillRect(bellaX-18,H-114,52,22);
+          ctx.strokeStyle='#333'; ctx.lineWidth=1; ctx.strokeRect(bellaX-18,H-114,52,22);
+          ctx.fillStyle=C.black; ctx.font='9px "Courier New"'; ctx.textAlign='center';
+          ctx.fillText('Au au!! *pata*',bellaX+8,H-99); ctx.textAlign='left';
+        }
+        // HUD
+        ctx.fillStyle='rgba(0,0,0,.6)'; ctx.fillRect(8,8,W-16,24);
+        ctx.fillStyle=C.white; ctx.font='10px "Courier New"';
+        ctx.fillText(`Bloqueios: ${blocks}/6  |  Pao: ${'[ok]'.repeat(bLives)+'[x]'.repeat(3-bLives)}  |  Vel: ${bellaSpeed.toFixed(1)}`,14,24);
+        px(0,H-22,W,22,'rgba(180,0,0,.85)');
+        ctx.fillStyle=C.white; ctx.font='bold 10px "Courier New"'; ctx.textAlign='center';
+        ctx.fillText('NAO DEIXA A BELLA COMER O PAO!! (cuidado com ataques surpresa)',W/2,H-8); ctx.textAlign='left';
+        if(bossWon){
+          ctx.fillStyle='rgba(0,0,0,.7)'; ctx.fillRect(0,0,W,H);
+          ctx.fillStyle=C.gold; ctx.textAlign='center'; ctx.font='bold 15px "Courier New"';
+          ctx.fillText('* Bella bloqueada! *',W/2,H/2-8);
+          ctx.fillStyle=C.white; ctx.font='11px "Courier New"';
+          ctx.fillText('A comida esta salva!',W/2,H/2+14); ctx.textAlign='left';
+        }
+      }
+      drawFHearts(); drawDialog();
+    },
+
+    onKey(code){
+      if(phase==='books'&&!booksDone){
+        if(code==='Space'||code==='Enter'){
+          if(picks.includes(bSel)){ SFX.error(); wrongFlash=true; wrongT=28; wrongShake=20; return; }
+          const bi=bookDisp[bSel];
+          if(!IS_BUKO[bi]){ SFX.error(); wrongFlash=true; wrongT=36; wrongShake=28; picks=[]; return; }
+          if(bi===CORRECT_SEQ[picks.length]){
+            SFX.collect();
+            picks.push(bSel);
+            if(picks.length===4){
+              SFX.success();
+              booksDone=true;
+              showDialog([
+                '"Mulheres. Factotum. Pulp. Misto Quente."',
+                '"Você a conhece de verdade."',
+                'Prova 1 superada! Agora... o Boss Final.',
+                'Bella vem dos dois lados. Bloqueie 6 vezes!',
+              ], ()=>{ phase='boss'; spawnBella(); });
+            }
+          } else { SFX.error(); wrongFlash=true; wrongT=36; wrongShake=28; picks=[]; }
+        }
+      }
+    }
+  };
+}
+
+// FINAL SCENE
+// ═══════════════════════════════════════════════════════════════
+function createFinal(skipIntro=false) {
+  let t=0, phase='dialog', msgAlpha=0, surpriseAlpha=0;
+  if(skipIntro) {
+    phase='message'; msgAlpha=1;
+  } else {
+    showDialog([
+      'Chef atravessou todos os lugares.',
+      'A academia onde tudo começou...',
+      'O morro onde o coração escolheu...',
+      'O cinema, a praia, a sorveteria...',
+      'E agora chegou onde sempre quis chegar.',
+      'Aqui. Com ela. ♥',
+    ], ()=>{ phase='message'; });
+  }
+
+  const MSG=[
+    'Feliz Dia dos Namorados, Chef.',
+    '',
+    'Cada lugar que passamos juntos',
+    'virou parte de quem somos.',
+    '',
+    'Você é minha aventura favorita.',
+    '',
+    '— Mrs. Puff  ♥',
+  ];
+
+  // ══ EDITE AQUI as linhas da surpresa real ══
+  const SURPRISE=[
+    'Me envie uma mensagem',
+    'e saiba onde estou',
+    'te esperando...',
+  ];
+  // ═══════════════════════════════════════════
+
+  return {
+    update(){
+      t++; if(t%18===0) spawnHeart();
+      if(phase==='dialog') updateDialog();
+      if(phase==='message') msgAlpha=Math.min(1,msgAlpha+.018);
+      if(phase==='surprise') surpriseAlpha=Math.min(1,surpriseAlpha+.025);
+      updateFHearts();
+    },
+    draw(){
+      // night sky
+      px(0,0,W,H,'#0a0318');
+      for(let i=0;i<90;i++){
+        const sx=(i*73+31)%W, sy=(i*97+17)%(H-55);
+        ctx.fillStyle=`rgba(255,255,255,${.2+.4*Math.sin(t*.04+i)})`; ctx.fillRect(sx,sy,1+(i%5===0?1:0),1+(i%5===0?1:0));
+      }
+      // moon
+      ctx.fillStyle='#ffffc8'; ctx.beginPath(); ctx.arc(58,48,22,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#0a0318'; ctx.beginPath(); ctx.arc(68,42,18,0,Math.PI*2); ctx.fill();
+      // ground & flowers
+      px(0,H-44,W,44,C.grn3); px(0,H-49,W,6,C.grn2);
+      for(let fx=18;fx<W;fx+=22){
+        const fh=8+(fx*7%12);
+        px(fx,H-49-fh,2,fh,C.grn2);
+        ctx.fillStyle=fx%44===18?C.pink:C.pink2;
+        ctx.beginPath(); ctx.arc(fx+1,H-49-fh,3.5,0,Math.PI*2); ctx.fill();
+      }
+      drawFHearts();
+      // characters together
+      if(phase!=='dialog'){
+        const cx=W/2;
+        drawChef(cx-35,H-88,1,t/30);
+        drawMrsPuff(cx+12,H-86,t/30);
+        const pulse=1+.08*Math.sin(t*.09);
+        ctx.save(); ctx.translate(cx-10,H-114); ctx.scale(pulse,pulse); drawHeart(-10,-10,22); ctx.restore();
+      }
+      // message card
+      if(msgAlpha>0){
+        ctx.save(); ctx.globalAlpha=msgAlpha;
+        ctx.fillStyle='rgba(8,4,24,.92)'; ctx.fillRect(18,12,W-36,158);
+        ctx.strokeStyle=C.pink; ctx.lineWidth=2; ctx.strokeRect(18,12,W-36,158);
+        drawHeart(22,15,10); drawHeart(W-34,15,10);
+        ctx.textAlign='center';
+        for(let i=0;i<MSG.length;i++){
+          if(!MSG[i]) continue;
+          const isTitle=i===0, isSig=i===MSG.length-1;
+          ctx.fillStyle=isTitle?C.gold:isSig?C.pink2:C.white;
+          ctx.font=`${isTitle?'bold 13':isSig?'italic 11':'11'}px "Courier New"`;
+          ctx.fillText(MSG[i],W/2,32+i*17);
+        }
+        ctx.restore();
+        if(msgAlpha>=1&&phase==='message'&&Math.floor(t/30)%2===0){
+          ctx.fillStyle=C.pink; ctx.font='10px "Courier New"'; ctx.textAlign='center';
+          ctx.fillText('[ ESPAÇO — ver a surpresa ]',W/2,H-52);
+        }
+        ctx.textAlign='left';
+      }
+      // surprise reveal
+      if(surpriseAlpha>0){
+        ctx.save(); ctx.globalAlpha=surpriseAlpha;
+        ctx.fillStyle='rgba(8,4,24,.97)'; ctx.fillRect(18,H/2-68,W-36,136);
+        ctx.strokeStyle=C.gold; ctx.lineWidth=2; ctx.strokeRect(18,H/2-68,W-36,136);
+        ctx.textAlign='center';
+        ctx.fillStyle=C.gold; ctx.font='bold 13px "Courier New"';
+        ctx.fillText('✨  SUA SURPRESA  ✨',W/2,H/2-46);
+        ctx.fillStyle=C.white; ctx.font='11px "Courier New"';
+        for(let i=0;i<SURPRISE.length;i++){
+          if(!SURPRISE[i]) continue;
+          ctx.fillText(SURPRISE[i],W/2,H/2-22+i*19);
+        }
+        ctx.fillStyle=C.pink2; ctx.font='italic 10px "Courier New"';
+        ctx.fillText('— com amor, Mrs. Puff  ♥',W/2,H/2+58);
+        ctx.restore();
+        ctx.textAlign='left';
+      }
+      drawDialog();
+    },
+    onKey(code){
+      if(phase==='message'&&msgAlpha>=1&&(code==='Space'||code==='Enter')){
+        phase='surprise'; for(let i=0;i<12;i++) spawnHeart();
+      }
+    }
+  };
+}
+
+// ─── LOOP ────────────────────────────────────────────────────
+function onKey(e) { if(e._debugHandled) return; if(scene&&scene.onKey) scene.onKey(e.code); }
+document.addEventListener('keydown', onKey);
+
+function resetTransientState() {
+  dialog = null;
+  fhearts.length = 0;
+  fadeAlpha = 0;
+  fadingIn = false;
+  fadingOut = false;
+  fadeCB = null;
+  clearJP();
+}
+
+function jumpToDebugScene(fn) {
+  resetTransientState();
+  scene = fn();
+}
+
+function handleDebugHotkey(e) {
+  if (!e.ctrlKey) return false;
+  if (/^(Digit|Numpad)[1-6]$/.test(e.code)) {
+    const idx = Number(e.code.replace('Digit','').replace('Numpad','')) - 1;
+    jumpToDebugScene(() => createGame(idx, true));
+    e._debugHandled = true;
+    e.preventDefault();
+    return true;
+  }
+  if (e.code === 'KeyF') {
+    jumpToDebugScene(() => createFinal(true));
+    e._debugHandled = true;
+    e.preventDefault();
+    return true;
+  }
+  return false;
+}
+
+function createInitialScene() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('scene') === 'title') return createTitle();
+  if (params.get('final') === '1') return createFinal(true);
+  const fase = Number(params.get('fase'));
+  if (Number.isInteger(fase) && fase >= 1 && fase <= 6) return createGame(fase - 1, true);
+  return createTitle();
+}
+
+function loop() {
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,W*SCALE,H*SCALE);
+  ctx.setTransform(SCALE,0,0,SCALE,0,0);
+  if(scene){ scene.update(); scene.draw(); }
+  updateFade(); drawFade();
+  clearJP();
+  requestAnimationFrame(loop);
+}
+
+scene = createInitialScene();
+loop();
+</script>
+</body>
+</html>
