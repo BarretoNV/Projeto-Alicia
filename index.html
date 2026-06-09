@@ -224,6 +224,25 @@ function drawHeart(x, y, s) {
   ctx.closePath(); ctx.fill();
 }
 
+function drawHUD(title, value, opts={}) {
+  const x=opts.x ?? 8, y=opts.y ?? 8, w=opts.w ?? 172, color=opts.color ?? C.pink;
+  ctx.fillStyle='rgba(5,5,18,.72)';
+  ctx.fillRect(x,y,w,24);
+  ctx.strokeStyle=color; ctx.lineWidth=1.5; ctx.strokeRect(x,y,w,24);
+  ctx.fillStyle=color; ctx.font='bold 7px "Courier New"'; ctx.textAlign='left';
+  ctx.fillText(title.toUpperCase(),x+8,y+9);
+  ctx.fillStyle=C.white; ctx.font='bold 10px "Courier New"';
+  ctx.fillText(value,x+8,y+20);
+}
+
+function drawBottomHint(text, color=C.pink) {
+  px(0,H-22,W,22,'rgba(5,5,18,.72)');
+  ctx.strokeStyle=color; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(0,H-22); ctx.lineTo(W,H-22); ctx.stroke();
+  ctx.fillStyle=C.white; ctx.font='9px "Courier New"'; ctx.textAlign='center';
+  ctx.fillText(text,W/2,H-8);
+  ctx.textAlign='left';
+}
+
 // ─── DIALOG ──────────────────────────────────────────────────
 let dialog = null;
 function showDialog(lines, onDone) {
@@ -339,6 +358,40 @@ function drawMrsPuff(x, y, frame=0) {
   px(x-2,y+9,4,1,C.red); px(x-3,y+8,1,1,C.red); px(x+2,y+8,1,1,C.red);
 }
 
+function drawTreadmillRunner(x, y, t, opts={}) {
+  const f=Math.floor(t/10)%2;
+  const dir=opts.dir ?? 1;
+  const skin=opts.skin ?? C.skin;
+  const shirt=opts.shirt ?? '#3355aa';
+  const shorts=opts.shorts ?? '#182244';
+  const hair=opts.hair ?? '#2e1a0e';
+  ctx.fillStyle='rgba(0,0,0,.25)'; ctx.fillRect(x-8,y+27,17,4);
+  // pernas correndo
+  px(x-5,y+20+f*2,4,8,shorts);
+  px(x+1,y+20+(1-f)*2,4,8,shorts);
+  px(x-6,y+27+f*2,7,3,'#111');
+  px(x,y+27+(1-f)*2,7,3,'#111');
+  // corpo e gola
+  px(x-6,y+8,12,13,shirt);
+  px(x-3,y+8,6,3,'rgba(255,255,255,.18)');
+  px(x-6,y+18,12,4,shorts);
+  // braços em corrida
+  px(x-9,y+10+(1-f)*2,4,8,skin);
+  px(x+5,y+10+f*2,4,8,skin);
+  px(x-10,y+15+(1-f)*2,4,3,shirt);
+  px(x+6,y+15+f*2,4,3,shirt);
+  // cabeça
+  px(x-6,y-2,12,10,skin);
+  px(x-6,y+7,12,2,'rgba(150,90,70,.45)');
+  px(x-7,y-6,14,6,hair);
+  px(x-7,y-3,3,5,hair);
+  px(x+4,y-3,3,5,hair);
+  const ex = dir > 0 ? [x-2, x+2] : [x-4, x];
+  px(ex[0],y+2,2,2,'#221'); px(ex[1],y+2,2,2,'#221');
+  px(ex[0],y+2,1,1,C.white); px(ex[1],y+2,1,1,C.white);
+  px(x-2,y+5,5,1,'#aa4433');
+}
+
 function drawBella(x, y, t) {
   const f=Math.floor(t/8)%2;
   const dark='#141414', shade='#e8e8e8';
@@ -378,35 +431,77 @@ let scene = null;
 
 // ─── LOCATION CARD ───────────────────────────────────────────
 const LOCS = [
-  { name:'Fla Fit Academia',      sub:'Fase 1 — O Encontro',          color:C.red   },
-  { name:'Morro do Rato',         sub:'Fase 2 — A Aproximação',       color:C.grn   },
-  { name:'Cinema',                sub:'Fase 3 — O Primeiro Encontro', color:C.purp  },
-  { name:'Praia de Santa Clara',  sub:'Fase 4 — O Mar de Nós',        color:C.teal  },
-  { name:'Sorvete Calebito',      sub:'Fase 5 — Sabor de Casa',       color:C.pink3 },
-  { name:'O Dia a Dia',           sub:'Fase 6 — A Mais Difícil',      color:'#cc8800'},
+  { name:'Fla Fit Academia',      sub:'Fase 1 — O Encontro',          color:C.red,    icon:'1', memory:'Onde um olhar transformou uma sexta-feira comum.' },
+  { name:'Morro do Rato',         sub:'Fase 2 — A Aproximação',       color:C.grn,    icon:'2', memory:'Entre chuva e subida, o coração escolheu ficar.' },
+  { name:'Cinema',                sub:'Fase 3 — O Primeiro Encontro', color:C.purp,   icon:'3', memory:'No escuro da sala, o mundo ficou pequeno.' },
+  { name:'Praia de Santa Clara',  sub:'Fase 4 — O Mar de Nós',        color:C.teal,   icon:'4', memory:'O lugar dela virou lembrança dos dois.' },
+  { name:'Sorvete Calebito',      sub:'Fase 5 — Sabor de Casa',       color:C.pink3,  icon:'5', memory:'Um sabor preferido, uma casa inventada a dois.' },
+  { name:'O Dia a Dia',           sub:'Fase 6 — A Mais Difícil',      color:'#cc8800',icon:'6', memory:'O cotidiano: livros, pão, Bella e amor prático.' },
 ];
 function createLocCard(idx) {
   let t=0;
+  let advancing=false;
   const loc=LOCS[idx];
+  function goNext() {
+    if(advancing) return;
+    advancing=true;
+    SFX.confirm();
+    fadeToScene(()=>createGame(idx));
+  }
   return {
-    update() { t++; if(t===101) fadeToScene(()=>createGame(idx)); },
+    update() {
+      t++;
+      if(t>=180 || justPressed['Space'] || justPressed['Enter']) goNext();
+    },
     draw() {
-      px(0,0,W,H,C.bg2);
-      // accent stripes
-      for(let i=0;i<W;i+=12) { ctx.fillStyle=`rgba(255,107,157,${.04+.02*(i%24===0?1:0)})`; ctx.fillRect(i,0,6,H); }
-      px(0,H/2-38,W,76,loc.color);
+      const bg=ctx.createLinearGradient(0,0,0,H);
+      bg.addColorStop(0,'#0f0c22'); bg.addColorStop(1,'#241024');
+      ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+      for(let i=0;i<60;i++){
+        const sx=(i*73+19)%W, sy=(i*47+11)%H;
+        ctx.fillStyle=`rgba(255,255,255,${.08+.12*Math.sin(t*.03+i)})`;
+        ctx.fillRect(sx,sy,1,1);
+      }
       ctx.textAlign='center';
-      ctx.fillStyle=C.white; ctx.font='bold 17px "Courier New"'; ctx.fillText(loc.name,W/2,H/2-8);
-      ctx.fillStyle='rgba(255,255,255,.75)'; ctx.font='11px "Courier New"'; ctx.fillText(loc.sub,W/2,H/2+12);
-      ctx.font='18px serif'; ctx.fillText('📍',W/2-10,H/2-28);
-      // progress
-      for(let i=0;i<5;i++){
-        ctx.fillStyle = i<=idx ? loc.color : '#333';
-        ctx.fillRect(W/2-54+i*24,H/2+26,18,8);
+      ctx.fillStyle=C.pink2; ctx.font='bold 10px "Courier New"';
+      ctx.fillText('MAPA DE MEMÓRIAS',W/2,34);
+      ctx.fillStyle=C.white; ctx.font='bold 20px "Courier New"';
+      ctx.fillText(loc.name,W/2,65);
+      ctx.fillStyle=loc.color; ctx.font='10px "Courier New"';
+      ctx.fillText(loc.sub,W/2,83);
+
+      const startX=58, endX=W-58, y=132;
+      ctx.strokeStyle='rgba(255,255,255,.2)'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(startX,y); ctx.lineTo(endX,y); ctx.stroke();
+      for(let i=0;i<LOCS.length;i++){
+        const x=startX+(endX-startX)*(i/(LOCS.length-1));
+        const done=i<idx, current=i===idx;
+        ctx.fillStyle=done?LOCS[i].color:current?loc.color:'#333342';
+        ctx.fillRect(x-10,y-10,20,20);
+        ctx.strokeStyle=current?C.gold:'rgba(255,255,255,.28)'; ctx.lineWidth=current?2:1;
+        ctx.strokeRect(x-10,y-10,20,20);
+        ctx.fillStyle=done||current?C.white:'#777';
+        ctx.font='bold 10px "Courier New"';
+        ctx.fillText(LOCS[i].icon,x,y+4);
+        if(done){
+          ctx.fillStyle=C.gold; ctx.font='8px "Courier New"';
+          ctx.fillText('✓',x+13,y-10);
+        }
+      }
+
+      ctx.fillStyle='rgba(5,4,18,.88)'; ctx.fillRect(34,166,W-68,58);
+      ctx.strokeStyle=loc.color; ctx.lineWidth=2; ctx.strokeRect(34,166,W-68,58);
+      ctx.fillStyle=C.white; ctx.font='11px "Courier New"';
+      ctx.fillText(loc.memory,W/2,190);
+      ctx.fillStyle='rgba(255,255,255,.7)'; ctx.font='9px "Courier New"';
+      ctx.fillText(`${idx} memórias guardadas  ·  próximo destino: ${loc.name}`,W/2,210);
+      if(Math.floor(t/24)%2===0){
+        ctx.fillStyle=C.pink2; ctx.font='9px "Courier New"';
+        ctx.fillText('[ ESPAÇO / ENTER para seguir ]',W/2,H-18);
       }
       ctx.textAlign='left';
     },
-    onKey(){}
+    onKey(code){ if(code==='Space'||code==='Enter') goNext(); }
   };
 }
 
@@ -647,11 +742,36 @@ function createGym(skipIntro=false) {
     draw(){
       // parede fundo escura com textura de listras
       px(0,0,W,H-58,'#0e0808');
-      for(let gx=0;gx<W;gx+=32){ ctx.fillStyle=`rgba(255,80,80,${gx%64===0?.04:.015})`; ctx.fillRect(gx,0,2,H-58); }
+      for(let gx=0;gx<W;gx+=28){
+        ctx.fillStyle=`rgba(255,80,80,${gx%56===0?.055:.02})`;
+        ctx.fillRect(gx,0,2,H-58);
+      }
+      for(let gy=18;gy<H-68;gy+=38){
+        ctx.fillStyle='rgba(255,255,255,.018)';
+        ctx.fillRect(0,gy,W,1);
+      }
+      // spots de luz suaves no logo e nos personagens
+      const wallGlow=ctx.createRadialGradient(W/2,48,10,W/2,48,190);
+      wallGlow.addColorStop(0,'rgba(255,70,70,.18)');
+      wallGlow.addColorStop(1,'rgba(255,70,70,0)');
+      ctx.fillStyle=wallGlow; ctx.fillRect(0,0,W,H-58);
+      const floorGlow=ctx.createRadialGradient(240,H-90,10,240,H-90,210);
+      floorGlow.addColorStop(0,'rgba(255,180,120,.08)');
+      floorGlow.addColorStop(1,'rgba(255,180,120,0)');
+      ctx.fillStyle=floorGlow; ctx.fillRect(0,62,W,H-62);
       // piso da academia
       px(0,H-58,W,58,'#1a0e0e');
-      px(0,H-60,W,4,'#2a1414');
-      for(let fx=0;fx<W;fx+=48){ ctx.fillStyle='rgba(255,255,255,.025)'; ctx.fillRect(fx,H-58,24,58); }
+      px(0,H-62,W,6,'#3a1717');
+      px(0,H-58,W,2,'#5a2020');
+      for(let fx=0;fx<W;fx+=36){
+        ctx.fillStyle='rgba(255,255,255,.035)'; ctx.fillRect(fx,H-58,18,58);
+        ctx.fillStyle='rgba(0,0,0,.18)'; ctx.fillRect(fx+18,H-58,2,58);
+      }
+      for(let fy=H-44;fy<H;fy+=14){ ctx.fillStyle='rgba(255,255,255,.025)'; ctx.fillRect(0,fy,W,1); }
+      // tapete/area de treino
+      px(332,H-68,72,16,'#271010');
+      px(334,H-66,68,2,'#4a1a1a');
+      px(334,H-54,68,2,'#4a1a1a');
 
       // ── LOGO FLA FIT centralizado na parede ──
       px(W/2-68,6,136,44,'#bb0f1f');
@@ -667,13 +787,20 @@ function createGym(skipIntro=false) {
       ctx.fillStyle='#ff6655'; ctx.font='6px "Courier New"';
       ctx.fillText('★  FORCE YOUR LIMITS  ★',W/2,60);
       ctx.textAlign='left';
+      // luminarias acima do logo
+      px(W/2-82,0,18,5,'#332020'); px(W/2+64,0,18,5,'#332020');
+      ctx.fillStyle='rgba(255,220,120,.18)';
+      ctx.beginPath(); ctx.moveTo(W/2-73,5); ctx.lineTo(W/2-116,92); ctx.lineTo(W/2-34,92); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(W/2+73,5); ctx.lineTo(W/2+34,92); ctx.lineTo(W/2+116,92); ctx.closePath(); ctx.fill();
 
       // ── ESPELHO grande à esquerda ──
-      px(4,8,62,H-68,'#121c28');
-      px(4,8,62,2,'#5a9abb'); px(4,H-62,62,2,'#5a9abb');
-      px(4,8,2,H-68,'#5a9abb'); px(64,8,2,H-68,'#5a9abb');
-      ctx.fillStyle='rgba(130,190,230,.06)'; ctx.fillRect(6,10,58,H-72);
-      ctx.fillStyle='rgba(255,255,255,.03)'; ctx.fillRect(6,10,58,20);
+      px(4,8,64,H-66,'#121c28');
+      px(4,8,64,3,'#5a9abb'); px(4,H-62,64,3,'#5a9abb');
+      px(4,8,3,H-66,'#5a9abb'); px(65,8,3,H-66,'#5a9abb');
+      ctx.fillStyle='rgba(130,190,230,.08)'; ctx.fillRect(7,11,58,H-72);
+      ctx.fillStyle='rgba(255,255,255,.04)'; ctx.fillRect(7,11,58,22);
+      ctx.fillStyle='rgba(255,255,255,.08)';
+      ctx.beginPath(); ctx.moveTo(9,18); ctx.lineTo(29,12); ctx.lineTo(65,H-130); ctx.lineTo(65,H-104); ctx.closePath(); ctx.fill();
       // "reflexo" do chef no espelho
       ctx.save(); ctx.globalAlpha=.35; ctx.scale(-1,1); drawChef(-26,H-102,-1,frame); ctx.restore();
 
@@ -685,10 +812,16 @@ function createGym(skipIntro=false) {
       px(W-82,44,72,2,'#ff3333');
       ctx.fillStyle='#ffaa44'; ctx.font='6px "Courier New"';
       ctx.fillText('FLA FIT ★',W-48,58); ctx.textAlign='left';
+      // pequenos paineis na parede
+      px(338,8,44,28,'#160808'); px(340,10,40,24,'#210c0c');
+      ctx.fillStyle='#ff3333'; ctx.font='bold 6px "Courier New"'; ctx.textAlign='center';
+      ctx.fillText('TREINO',360,21);
+      ctx.fillStyle='#ffaa44'; ctx.font='5px "Courier New"'; ctx.fillText('DO DIA',360,31); ctx.textAlign='left';
 
       // ── POLIA / CABLE MACHINE (à esquerda) ──
-      px(72,H-230,12,170,'#3a3a40');
-      px(70,H-232,16,6,'#555');
+      px(72,H-230,12,170,'#45454d');
+      px(86,H-230,4,170,'#28282e');
+      px(70,H-232,20,6,'#666');
       ctx.fillStyle='#666'; ctx.beginPath(); ctx.arc(78,H-230,9,0,Math.PI*2); ctx.fill();
       ctx.fillStyle='#999'; ctx.beginPath(); ctx.arc(78,H-230,6,0,Math.PI*2); ctx.fill();
       ctx.fillStyle='#333'; ctx.beginPath(); ctx.arc(78,H-230,2.5,0,Math.PI*2); ctx.fill();
@@ -697,6 +830,7 @@ function createGym(skipIntro=false) {
       px(72,H-140,12,5,'#888');
       for(let ws=0;ws<6;ws++) px(71,H-100-ws*9,14,7,ws%2?'#444':'#555');
       px(69,H-100,18,3,'#777');
+      px(68,H-62,24,4,'#555');
 
       // ── BANCO DE SUPINO ──
       px(100,H-98,65,8,'#555');
@@ -718,19 +852,13 @@ function createGym(skipIntro=false) {
         px(x+14,y-16,20,12,'#0a2010');
         ctx.fillStyle='#44ff55'; ctx.font='5px monospace'; ctx.textAlign='center';
         ctx.fillText('5.0',x+24,y-8); ctx.textAlign='left';
+        px(x+17,y-14,4,3,'#44ff55'); px(x+25,y-14,4,3,'#44ff55');
       }
       treadmill(148,H-108); treadmill(205,H-108);
 
       // ── NPCs nas esteiras ──
-      const nf=Math.floor(t/10)%2;
-      // NPC 1 (azul)
-      px(163,H-138,8,14,'#2244aa'); px(164,H-153,6,10,C.skin);
-      px(162,H-157,8,5,'#1a1008');
-      px(162,H-126+nf*2,4,9,'#1a3388'); px(166,H-126+(1-nf)*2,4,9,'#1a3388');
-      // NPC 2 (vermelho)
-      px(220,H-138,8,14,'#aa2211'); px(221,H-153,6,10,C.skin);
-      px(219,H-157,8,5,'#222');
-      px(220,H-126+nf*2,4,9,'#881a08'); px(224,H-126+(1-nf)*2,4,9,'#881a08');
+      drawTreadmillRunner(167,H-127,t,{shirt:'#2244aa',shorts:'#172a66',hair:'#2e1a0e',skin:'#dca878',dir:1});
+      drawTreadmillRunner(224,H-127,t+7,{shirt:'#bb2218',shorts:'#552018',hair:'#242424',skin:'#f0c08a',dir:1});
 
       // ── RACK DE ANILHAS ──
       px(270,H-88,55,6,'#555');
@@ -742,6 +870,12 @@ function createGym(skipIntro=false) {
 
       // ── ANILHAS NO CHÃO ──
       for(let i=0;i<5;i++){ const wx=330+i*20; px(wx,H-90,12,28,i%2?'#444':'#555'); px(wx+2,H-88,8,24,'#2a2a2a'); }
+      // detalhes de chao
+      px(386,H-78,10,4,'#ccddff'); px(388,H-82,6,4,'#77aaff'); // garrafinha
+      px(410,H-72,20,5,'#aa2233'); px(414,H-75,12,3,'#dd5570'); // toalha
+      ctx.fillStyle='rgba(0,0,0,.25)';
+      ctx.fillRect(68,H-71,250,8);
+      ctx.fillRect(330,H-69,76,7);
 
       // characters
       drawChef(80,H-102,1,frame);
@@ -981,9 +1115,7 @@ function createHill(skipIntro=false) {
       ctx.fillStyle=fogGrad; ctx.fillRect(0,H-55,W,35);
       drawFHearts();
       drawChef(px2,py2-28,dir,frame);
-      ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(8,8,160,22);
-      ctx.fillStyle=C.white; ctx.font='11px "Courier New"';
-      ctx.fillText(`🍃 ${collected}/5 goiabas  FASE 2`,14,23);
+      drawHUD('Fase 2 · Morro do Rato', `Goiabas ${collected}/5`, {w:178, color:C.grn});
       drawDialog();
     },
     onKey(){}
@@ -1473,10 +1605,7 @@ function createBeach(skipIntro=false) {
       }
       drawFHearts();
       drawChef(px2,H-55,dir,frame);
-      // hud
-      ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(8,8,200,22);
-      ctx.fillStyle=C.white; ctx.font='11px "Courier New"';
-      ctx.fillText(`🐟 ${score}/${target}   VIDAS: ${'♥'.repeat(lives)+'♡'.repeat(3-lives)}`,14,23);
+      drawHUD('Fase 4 · Santa Clara', `Bagres ${score}/${target}  Vidas ${'♥'.repeat(lives)+'♡'.repeat(3-lives)}`, {w:214, color:C.teal});
       if(over){
         ctx.fillStyle='rgba(0,0,0,.7)'; ctx.fillRect(0,0,W,H);
         ctx.fillStyle=C.red; ctx.textAlign='center'; ctx.font='bold 18px "Courier New"';
@@ -1721,10 +1850,7 @@ function createIceCream(skipIntro=false) {
       }
       drawFHearts();
       drawChef(32,H-75,1,t/30);
-      px(0,H-20,W,20,'rgba(0,0,0,.45)');
-      ctx.fillStyle=C.white; ctx.font='9px "Courier New"'; ctx.textAlign='center';
-      if(!revealed) ctx.fillText('← → ↑ ↓ escolher  ·  ESPAÇO confirmar',W/2,H-7);
-      ctx.textAlign='left';
+      if(!revealed) drawBottomHint('← → ↑ ↓ escolher  ·  ESPAÇO confirmar', C.pink3);
       drawDialog();
     },
     onKey(code){
@@ -1762,6 +1888,9 @@ function createDailyLife(skipIntro=false) {
   let warningBlink=0;
   const breadX=W/2;
   const breadHitRange=34;
+  const BELLA_BLOCKS_TO_WIN=10;
+  const BELLA_MAX_SPEED=8.0;
+  const BELLA_BLOCK_SPEED_GAIN=0.65;
 
   function spawnBella(){
     if(Math.random()<0.5){
@@ -1816,14 +1945,14 @@ function createDailyLife(skipIntro=false) {
           if(dist<20||(tunneled&&nearBellaPath)){
             SFX.block();
             bellaState='blocked'; bellaT=0; blocks++;
-            bellaSpeed=Math.min(6.0,bellaSpeed+0.4);
+            bellaSpeed=Math.min(BELLA_MAX_SPEED,bellaSpeed+BELLA_BLOCK_SPEED_GAIN);
             for(let i=0;i<3;i++) spawnHeart(bellaX,H-85);
-            if(blocks>=6){ SFX.success(); bossWon=true; bellaT=0; }
+            if(blocks>=BELLA_BLOCKS_TO_WIN){ SFX.success(); bossWon=true; bellaT=0; }
           }
           // Bella chega ao pão central
           if(bellaState==='run'&&((bellaDir===1&&bellaX>breadX-breadHitRange)||(bellaDir===-1&&bellaX<breadX+breadHitRange))){
             SFX.hit();
-            bLives--; bellaSpeed=Math.min(6.0,bellaSpeed+0.3);
+            bLives--; bellaSpeed=Math.min(BELLA_MAX_SPEED,bellaSpeed+0.3);
             if(bLives<=0){ bLives=3; blocks=Math.max(0,blocks-1); }
             spawnBella();
           }
@@ -1904,10 +2033,7 @@ function createDailyLife(skipIntro=false) {
         px(0,H-48,W,48,'rgba(0,0,0,.0)'); // já existe o chão
         ctx.fillStyle='#3a2010'; ctx.font='bold 9px "Courier New"'; ctx.textAlign='center';
         ctx.fillText('Qual a ordem dos favoritos do Bukowski dela?',W/2,H-34);
-        ctx.fillStyle='#6a4030'; ctx.font='7px "Courier New"';
-        ctx.fillText('← → ↑ ↓ navegar  ·  ESPAÇO confirmar  ·  livro errado = reinicia',W/2,H-22);
-        ctx.fillStyle='#3a2010'; ctx.font='bold 8px "Courier New"';
-        ctx.fillText(`Confirmados: ${picks.length} / 4`,W/2,H-10);
+        drawBottomHint(`Confirmados ${picks.length}/4  ·  ← → ↑ ↓ navegar  ·  ESPAÇO confirmar`, '#cc8800');
         ctx.textAlign='left';
         drawChef(22,H-75,1,t/30);
       }
@@ -1943,13 +2069,8 @@ function createDailyLife(skipIntro=false) {
           ctx.fillStyle=C.black; ctx.font='9px "Courier New"'; ctx.textAlign='center';
           ctx.fillText('Au au!! *pata*',bellaX+8,H-99); ctx.textAlign='left';
         }
-        // HUD
-        ctx.fillStyle='rgba(0,0,0,.6)'; ctx.fillRect(8,8,W-16,24);
-        ctx.fillStyle=C.white; ctx.font='10px "Courier New"';
-        ctx.fillText(`Bloqueios: ${blocks}/6  |  Pao: ${'[ok]'.repeat(bLives)+'[x]'.repeat(3-bLives)}  |  Vel: ${bellaSpeed.toFixed(1)}`,14,24);
-        px(0,H-22,W,22,'rgba(180,0,0,.85)');
-        ctx.fillStyle=C.white; ctx.font='bold 10px "Courier New"'; ctx.textAlign='center';
-        ctx.fillText('NAO DEIXA A BELLA COMER O PAO!! (cuidado com ataques surpresa)',W/2,H-8); ctx.textAlign='left';
+        drawHUD('Boss Bella', `Bloqueios ${blocks}/${BELLA_BLOCKS_TO_WIN}  Pao ${'[ok]'.repeat(bLives)+'[x]'.repeat(3-bLives)}  Vel ${bellaSpeed.toFixed(1)}`, {w:310, color:'#cc8800'});
+        drawBottomHint('NAO DEIXA A BELLA COMER O PAO!!', '#cc8800');
         if(bossWon){
           ctx.fillStyle='rgba(0,0,0,.7)'; ctx.fillRect(0,0,W,H);
           ctx.fillStyle=C.gold; ctx.textAlign='center'; ctx.font='bold 15px "Courier New"';
@@ -1977,7 +2098,7 @@ function createDailyLife(skipIntro=false) {
                 '"Mulheres. Factotum. Pulp. Misto Quente."',
                 '"Você a conhece de verdade."',
                 'Prova 1 superada! Agora... o Boss Final.',
-                'Bella vem dos dois lados. Bloqueie 6 vezes!',
+                'Bella vem dos dois lados. Bloqueie 10 vezes!',
               ], ()=>{ phase='boss'; spawnBella(); });
             }
           } else { SFX.error(); wrongFlash=true; wrongT=36; wrongShake=28; picks=[]; }
