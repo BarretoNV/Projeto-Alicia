@@ -1,6 +1,6 @@
 # Chef's Quest
 
-Um joguinho romântico e interativo feito em HTML5 Canvas, em arquivo único, para contar uma história em fases. O jogo tem tela inicial, introdução, mapa de memórias entre fases, 6 mini-games e uma cena final.
+Um joguinho romântico e interativo feito em HTML5 Canvas, da minha amiga para o namorado dela, feito em arquivo único, para contar uma história em fases. O jogo tem tela inicial, introdução, mapa de memórias entre fases, 6 mini-games e uma cena final.
 
 ## Como Rodar
 
@@ -32,6 +32,7 @@ Para testar fases sem jogar tudo desde o comeco, use parametros na URL:
 
 Tambem existem atalhos globais:
 
+- `Ctrl+R`: reinicia o jogo recarregando a página.
 - `Ctrl+1` ate `Ctrl+6`: pula direto para a fase correspondente.
 - `Ctrl+F`: pula direto para o final.
 
