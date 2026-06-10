@@ -186,6 +186,11 @@ const C = {
   white:'#ffffff', gray:'#888888', dark:'#222233', black:'#000000',
 };
 
+const harleyImg = new Image();
+let harleyImgReady = false;
+harleyImg.onload = () => { harleyImgReady = true; };
+harleyImg.src = 'pngharley.png';
+
 // ─── FADE ────────────────────────────────────────────────────
 let fadeAlpha = 0, fadingIn = false, fadingOut = false, fadeCB = null;
 function fadeToScene(fn) {
@@ -451,7 +456,7 @@ function createLocCard(idx) {
   return {
     update() {
       t++;
-      if(t>=180 || justPressed['Space'] || justPressed['Enter']) goNext();
+      if(justPressed['Space'] || justPressed['Enter']) goNext();
     },
     draw() {
       const bg=ctx.createLinearGradient(0,0,0,H);
@@ -518,67 +523,57 @@ function createTitle() {
     ctx.fillRect(cx,cy,cw*.68,12);
   }
 
-  function drawHarley(x, gy){
-    const wr=10, wy=gy-wr;
-    // rear wheel (fat tire — cruiser style)
-    ctx.fillStyle='#0d0d0d'; ctx.beginPath(); ctx.arc(x+12,wy,wr,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#282828'; ctx.beginPath(); ctx.arc(x+12,wy,wr-3,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#888'; ctx.beginPath(); ctx.arc(x+12,wy,2.5,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle='#555'; ctx.lineWidth=0.8;
-    for(let a=0;a<6;a++){ const ag=a*Math.PI/3; ctx.beginPath(); ctx.moveTo(x+12,wy); ctx.lineTo(x+12+Math.cos(ag)*(wr-3),wy+Math.sin(ag)*(wr-3)); ctx.stroke(); }
-    // rear fender
-    ctx.strokeStyle='#111'; ctx.lineWidth=2.5;
-    ctx.beginPath(); ctx.arc(x+12,wy,wr+2,Math.PI*1.15,Math.PI*1.85,true); ctx.stroke();
-    // front wheel
-    ctx.fillStyle='#0d0d0d'; ctx.beginPath(); ctx.arc(x+50,wy,wr,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#282828'; ctx.beginPath(); ctx.arc(x+50,wy,wr-3,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#888'; ctx.beginPath(); ctx.arc(x+50,wy,2.5,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle='#555'; ctx.lineWidth=0.8;
-    for(let a=0;a<6;a++){ const ag=a*Math.PI/3; ctx.beginPath(); ctx.moveTo(x+50,wy); ctx.lineTo(x+50+Math.cos(ag)*(wr-3),wy+Math.sin(ag)*(wr-3)); ctx.stroke(); }
-    // front fender
-    ctx.strokeStyle='#111'; ctx.lineWidth=2.5;
-    ctx.beginPath(); ctx.arc(x+50,wy,wr+2,Math.PI*1.15,Math.PI*1.85,true); ctx.stroke();
-    // main frame (low cruiser rake)
-    ctx.strokeStyle='#181818'; ctx.lineWidth=3;
-    ctx.beginPath(); ctx.moveTo(x+12,wy-7); ctx.lineTo(x+26,wy-21); ctx.lineTo(x+42,wy-17); ctx.lineTo(x+50,wy-7); ctx.stroke();
-    // lower frame brace
-    ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(x+12,wy-7); ctx.lineTo(x+24,wy-10); ctx.lineTo(x+42,wy-10); ctx.stroke();
-    // tank (wide, low teardrop shape)
-    ctx.fillStyle='#111';
-    ctx.beginPath(); ctx.moveTo(x+18,wy-21); ctx.lineTo(x+40,wy-23); ctx.lineTo(x+42,wy-17); ctx.lineTo(x+18,wy-17); ctx.closePath(); ctx.fill();
-    ctx.fillStyle='rgba(220,220,220,.15)'; ctx.fillRect(x+19,wy-22,18,4); // chrome sheen
-    // HD logo on tank (orange — Harley Davidson brand color)
-    ctx.fillStyle='#ff6600'; ctx.font='bold 5px sans-serif'; ctx.textAlign='center';
-    ctx.fillText('H-D',x+30,wy-17); ctx.textAlign='left';
-    // seat (long, stepped — classic cruiser)
-    px(x+15,wy-25,24,4,'#1a0e06');
-    px(x+16,wy-27,22,3,'#2e1a08');
-    ctx.fillStyle='rgba(255,255,255,.07)'; ctx.fillRect(x+17,wy-27,10,2);
-    // V-twin engine (chrome, exposed — signature Harley look)
-    px(x+22,wy-15,13,9,'#9a9a9a');
-    px(x+24,wy-13,9,5,'#c0c0c0');
-    px(x+22,wy-18,4,4,'#aaa'); px(x+30,wy-18,4,4,'#aaa'); // V-twin cylinder heads
-    px(x+23,wy-7,11,3,'#777'); // lower block
-    px(x+24,wy-14,3,3,'#ddd'); px(x+32,wy-14,3,3,'#ddd'); // chrome bolts
-    // exhaust pipe (low, sweeping chrome — Harley style)
-    ctx.strokeStyle='#a0a0a0'; ctx.lineWidth=2.5;
-    ctx.beginPath(); ctx.moveTo(x+23,wy-6); ctx.bezierCurveTo(x+14,wy-1,x+7,wy+2,x+2,wy+2); ctx.stroke();
-    ctx.fillStyle='#777'; ctx.beginPath(); ctx.arc(x+2,wy+2,3,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#444'; ctx.beginPath(); ctx.arc(x+2,wy+2,1.5,0,Math.PI*2); ctx.fill();
-    // front fork (raked, cruiser angle)
-    ctx.strokeStyle='#c0c0c0'; ctx.lineWidth=1.8;
-    ctx.beginPath(); ctx.moveTo(x+41,wy-17); ctx.lineTo(x+47,wy-1); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(x+43,wy-17); ctx.lineTo(x+50,wy-1); ctx.stroke();
-    // ape hanger handlebars
-    ctx.strokeStyle='#c8c8c8'; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.moveTo(x+41,wy-17); ctx.lineTo(x+36,wy-30); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(x+43,wy-17); ctx.lineTo(x+47,wy-30); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(x+33,wy-30); ctx.lineTo(x+50,wy-30); ctx.stroke();
-    px(x+30,wy-32,5,4,'#222'); px(x+48,wy-32,5,4,'#222'); // grips
-    // headlight (round — classic Harley)
-    ctx.fillStyle='#fff8d0'; ctx.beginPath(); ctx.arc(x+54,wy-12,5,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#ffe530'; ctx.beginPath(); ctx.arc(x+54,wy-12,3,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle='#aaa'; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(x+54,wy-12,5,0,Math.PI*2); ctx.stroke();
+  function drawHarley(x, gy, s=1){
+    ctx.save(); ctx.translate(x,gy); ctx.scale(s,s);
+    const wy=-10;
+    ctx.fillStyle='rgba(0,0,0,.34)';
+    ctx.fillRect(-4,0,78,7);
+    function blockWheel(cx){
+      px(cx-9,wy-5,18,10,'#050505');
+      px(cx-7,wy-8,14,16,'#050505');
+      px(cx-5,wy-5,10,10,'#1a1a1f');
+      px(cx-3,wy-3,6,6,'#30333a');
+      px(cx-8,wy-1,16,2,'#b8bec4');
+      px(cx-1,wy-7,2,14,'#b8bec4');
+      px(cx-2,wy-2,4,4,'#e6e6e6');
+    }
+    blockWheel(12); blockWheel(58);
+    px(2,wy-18,20,5,'#050505');
+    px(8,wy-22,18,5,'#101010');
+    px(20,wy-27,26,5,'#050505');
+    px(25,wy-31,21,5,'#171717');
+    px(38,wy-26,10,6,'#050505');
+    px(49,wy-21,16,5,'#0d0d0d');
+    px(54,wy-24,15,4,'#2d2d2d');
+    px(64,wy-20,10,7,'#111');
+    px(69,wy-17,6,8,'#3f3f3f');
+    px(28,wy-24,18,12,'#101010');
+    px(31,wy-22,10,3,'#f05a1a');
+    ctx.fillStyle='#ff8a20'; ctx.font='bold 5px "Courier New"'; ctx.textAlign='center';
+    ctx.fillText('883',36,wy-15); ctx.textAlign='left';
+    px(31,wy-13,6,16,'#bfc0c2');
+    px(39,wy-13,6,16,'#d8d8d8');
+    px(28,wy-5,18,7,'#555');
+    px(33,wy-9,9,3,'#9b9b9b');
+    ctx.strokeStyle='#c8c8c8'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.moveTo(40,wy-7); ctx.lineTo(8,wy+5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(43,wy-3); ctx.lineTo(2,wy+10); ctx.stroke();
+    px(-5,wy+3,11,5,'#585858');
+    px(-8,wy+9,14,5,'#4a4a4a');
+    ctx.strokeStyle='#d6d6d6'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.moveTo(48,wy-25); ctx.lineTo(57,wy-1); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(52,wy-25); ctx.lineTo(62,wy-1); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(49,wy-27); ctx.lineTo(42,wy-40); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(52,wy-27); ctx.lineTo(62,wy-40); ctx.stroke();
+    px(38,wy-43,10,5,'#050505');
+    px(60,wy-43,10,5,'#050505');
+    px(48,wy-40,5,4,'#2d2d2d');
+    px(63,wy-29,8,10,'#f5ecc5');
+    px(66,wy-26,3,4,'#fff5aa');
+    px(57,wy-31,4,3,'#ff8a20');
+    px(71,wy-21,4,3,'#ff8a20');
+    px(1,wy-24,7,4,'#d6232e');
+    ctx.restore();
   }
 
   return {
@@ -614,6 +609,10 @@ function createTitle() {
       // road (asphalt)
       px(0,H-48,W,48,'#4a4a58');
       px(0,H-51,W,4,'#5a5a68'); // edge highlight
+      ctx.fillStyle='rgba(255,255,255,.08)';
+      ctx.fillRect(0,H-44,W,1);
+      ctx.fillStyle='rgba(0,0,0,.18)';
+      for(let rx=0;rx<W;rx+=38) ctx.fillRect(rx,H-47,20,1);
       // road markings
       px(0,H-49,W,2,'#e8e020'); // yellow center stripe
       ctx.fillStyle='rgba(255,255,255,.7)';
@@ -623,13 +622,21 @@ function createTitle() {
       ctx.fillStyle='rgba(0,0,0,.2)'; ctx.fillRect(0,H-48,W,4);
 
       drawFHearts();
-      // Harley Davidson
-      drawHarley(200,H-48);
-      // Characters flanking the moto
-      drawChef(165,H-77,1,t/22);
-      drawMrsPuff(270,H-75,t/22);
+      ctx.fillStyle='rgba(0,0,0,.28)';
+      ctx.beginPath(); ctx.ellipse(W/2-12,H-45,56,10,0,0,Math.PI*2); ctx.fill();
+      // Harley 883
+      if(harleyImgReady || harleyImg.complete){
+        ctx.drawImage(harleyImg,W/2-45,H-85,74,51);
+      } else {
+        drawHarley(W/2-76,H-45,.9);
+      }
+      // Characters side by side
+      ctx.fillStyle='rgba(0,0,0,.22)';
+      ctx.beginPath(); ctx.ellipse(W/2+88,H-46,38,8,0,0,Math.PI*2); ctx.fill();
+      drawChef(W/2+68,H-77,1,t/22);
+      drawMrsPuff(W/2+104,H-75,t/22);
       // heart above center
-      drawHeart(W/2-7,H-100,10);
+      drawHeart(W/2+42,H-104,10);
 
       // title
       ctx.save();
@@ -1201,13 +1208,6 @@ function createCinema(skipIntro=false) {
       // paredes laterais escuras
       ctx.fillStyle='#080514'; ctx.fillRect(0,0,26,H); ctx.fillRect(W-26,0,26,H);
       ctx.fillStyle='#0a0618'; ctx.fillRect(0,0,W,4);
-      // saída de emergência — apenas placa verde, sem poster
-      ctx.fillStyle='#003a00'; ctx.fillRect(1,H-70,24,12);
-      ctx.fillStyle='#00dd00'; ctx.font='5px "Courier New"'; ctx.textAlign='center';
-      ctx.fillText('SAÍDA',13,H-61); ctx.textAlign='left';
-      ctx.fillStyle='#003a00'; ctx.fillRect(W-25,H-70,24,12);
-      ctx.fillStyle='#00dd00'; ctx.font='5px "Courier New"'; ctx.textAlign='center';
-      ctx.fillText('SAÍDA',W-13,H-61); ctx.textAlign='left';
       // feixe do projetor
       ctx.save();
       const projGrad=ctx.createLinearGradient(W/2,H-10,W/2,3);
@@ -1282,11 +1282,6 @@ function createCinema(skipIntro=false) {
       // sombra dramática no chão
       ctx.fillStyle='rgba(0,0,0,0.5)';
       ctx.beginPath(); ctx.ellipse(vx+1,SY+SH-4,18,5,0,0,Math.PI*2); ctx.fill();
-      // título NOSFERATU piscando
-      if(Math.floor(Date.now()/700)%2===0){
-        ctx.fillStyle='rgba(200,0,0,0.95)'; ctx.font='bold 8px "Courier New"'; ctx.textAlign='center';
-        ctx.fillText('N O S F E R A T U',W/2,SY+SH-4);
-      }
       ctx.textAlign='left';
       // borda da tela (mais espessa e brilhante)
       ctx.strokeStyle='#6644aa'; ctx.lineWidth=3; ctx.strokeRect(SX,SY,SW,SH);
@@ -1314,6 +1309,13 @@ function createCinema(skipIntro=false) {
       ctx.fillStyle='#2a1a00'; ctx.fillRect(118,103,6,4); ctx.fillRect(128,103,6,4); // mãos sobre os olhos
       // pessoa agarrando o apoio de braço (fileira 3, col 6)
       ctx.fillStyle='#2a1a00'; ctx.fillRect(306,115,4,8); // braço apertando
+      // placa de saída vertical na parede lateral
+      ctx.fillStyle='rgba(0,220,40,.18)'; ctx.fillRect(W-48,96,18,50);
+      ctx.fillStyle='#003a00'; ctx.fillRect(W-44,100,12,42);
+      ctx.strokeStyle='#00bb33'; ctx.lineWidth=1; ctx.strokeRect(W-44,100,12,42);
+      ctx.fillStyle='#00ff55'; ctx.font='bold 6px "Courier New"'; ctx.textAlign='center';
+      'SAÍDA'.split('').forEach((ch,i)=>ctx.fillText(ch,W-38,108+i*8));
+      ctx.textAlign='left';
       // Chef e Mrs.Puff na última fileira
       drawChef(213,128,1,0);
       drawMrsPuff(265,126,0);
@@ -1378,7 +1380,7 @@ function createBeach(skipIntro=false) {
   let waves=[], items=[], wt=0, it=0;
   let won=false, over=false, endT=0;
 
-  function spW(){ waves.push({x:Math.random()*(W-60)+10, y:-20, vy:1.8+Math.random()*2.2, w:38+Math.random()*36, danger:Math.random()<.58}); }
+  function spW(){ waves.push({x:Math.random()*(W-60)+10, y:-20, vy:1.8+Math.random()*2.2, w:38+Math.random()*36, danger:true, dir:Math.random()<.5?-1:1}); }
   function spI(){ items.push({x:Math.random()*(W-50)+15, y:-14, vy:.8+Math.random()*.8}); }
 
   if(skipIntro) {
@@ -1387,7 +1389,8 @@ function createBeach(skipIntro=false) {
     showDialog([
       'Praia de Santa Clara. Brisa do mar. Pôr do sol.',
       'Ela te trouxe para o lugar mais especial dela.',
-      'Desvie das ondas vermelhas e colete os bagres!',
+      'Desvie das piranhas e colete os bagres!',
+      'Cuidado com as piranhas... as do mar, claro.',
       '← → para mover. Boa sorte! 🌊',
     ], ()=>{ phase='game'; });
   }
@@ -1429,7 +1432,7 @@ function createBeach(skipIntro=false) {
         if(won&&endT===50){
           showDialog([
             '"Santa Clara. O lugar mais especial dela — e agora nosso."',
-            '"Cada onda que passou, a gente superou junto."',
+            '"Cada piranha que passou, a gente superou junto."',
             'Fase 4 concluída! Última parada: Calebito! 🍦',
           ], ()=>fadeToScene(()=>createLocCard(4)));
           phase='outro';
@@ -1566,14 +1569,27 @@ function createBeach(skipIntro=false) {
         ctx.beginPath(); ctx.arc(x-2,H-128,3,0,Math.PI*2); ctx.fill();
       }
       palm(22); palm(W-44); palm(W/2-10);
-      // waves
+      function drawPiranha(cx,cy,flip){
+        ctx.save(); ctx.translate(cx,cy); ctx.scale(flip,1);
+        ctx.fillStyle='#a01622';
+        ctx.beginPath(); ctx.ellipse(0,0,14,8,0,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#f2d6b8';
+        ctx.beginPath(); ctx.ellipse(3,3,9,4,0,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='#781018';
+        ctx.beginPath(); ctx.moveTo(-11,-2); ctx.lineTo(-22,-9); ctx.lineTo(-19,0); ctx.lineTo(-22,9); ctx.closePath(); ctx.fill();
+        ctx.fillStyle='#d62633';
+        ctx.beginPath(); ctx.moveTo(-2,-7); ctx.lineTo(4,-15); ctx.lineTo(7,-6); ctx.closePath(); ctx.fill();
+        ctx.fillStyle='#f7f7f7';
+        ctx.beginPath(); ctx.moveTo(10,-4); ctx.lineTo(18,-2); ctx.lineTo(10,0); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(10,1); ctx.lineTo(17,3); ctx.lineTo(10,5); ctx.closePath(); ctx.fill();
+        ctx.fillStyle='#111'; ctx.fillRect(7,-5,3,3);
+        ctx.fillStyle='#fff'; ctx.fillRect(8,-5,1,1);
+        ctx.fillStyle='rgba(255,255,255,.25)'; ctx.fillRect(-5,-5,9,2);
+        ctx.restore();
+      }
+      // piranhas
       for(let w of waves){
-        ctx.fillStyle=w.danger?'rgba(255,50,50,.65)':'rgba(68,170,200,.55)';
-        ctx.beginPath(); ctx.ellipse(w.x+w.w/2,w.y+9,w.w/2,9,0,0,Math.PI*2); ctx.fill();
-        if(w.danger){
-          ctx.fillStyle='rgba(255,255,255,.9)'; ctx.font='11px serif'; ctx.textAlign='center';
-          ctx.fillText('!',w.x+w.w/2,w.y+13); ctx.textAlign='left';
-        }
+        drawPiranha(w.x+w.w/2,w.y+9,w.dir);
       }
       // items — bagres mortos
       for(let i of items){
@@ -1609,7 +1625,7 @@ function createBeach(skipIntro=false) {
       if(over){
         ctx.fillStyle='rgba(0,0,0,.7)'; ctx.fillRect(0,0,W,H);
         ctx.fillStyle=C.red; ctx.textAlign='center'; ctx.font='bold 18px "Courier New"';
-        ctx.fillText('Uma onda te pegou!',W/2,H/2-8);
+        ctx.fillText('Uma piranha te pegou!',W/2,H/2-8);
         ctx.fillStyle=C.white; ctx.font='11px "Courier New"';
         ctx.fillText('Recomeçando...',W/2,H/2+14); ctx.textAlign='left';
       }
@@ -1629,6 +1645,7 @@ function createBeach(skipIntro=false) {
 function createIceCream(skipIntro=false) {
   let phase='dialog', t=0, sel=0, revealed=false, revT=0;
   let shuffleT=0, shuffleFlash=0;
+  const SHUFFLE_INTERVAL = 180;
   const BASE_FLAVORS=[
     {name:'Nero',           color:'#1a1a1a', special:true },
     {name:'Ninho\nc/Morango',color:'#f5c8a0', special:false},
@@ -1637,14 +1654,15 @@ function createIceCream(skipIntro=false) {
     {name:'Choc.\nBelga',   color:'#2a0e06', special:false},
   ];
   let FLAVORS=[...BASE_FLAVORS];
-  function shuffle(){
+  function shuffle(silent=false){
     // Fisher-Yates shuffle
     for(let i=FLAVORS.length-1;i>0;i--){
       const j=Math.floor(Math.random()*(i+1));
       [FLAVORS[i],FLAVORS[j]]=[FLAVORS[j],FLAVORS[i]];
     }
-    sel=0; shuffleFlash=40;
+    sel=0; shuffleFlash=silent?0:40;
   }
+  shuffle(true);
 
   if(skipIntro) {
     phase='game';
@@ -1663,7 +1681,7 @@ function createIceCream(skipIntro=false) {
       if(phase==='dialog'){ updateDialog(); return; }
       if(phase==='outro'){ updateDialog(); return; }
       if(!revealed){
-        shuffleT++; if(shuffleT>=600){ shuffleT=0; shuffle(); } // embaralha a cada 10s
+        shuffleT++; if(shuffleT>=SHUFFLE_INTERVAL){ shuffleT=0; shuffle(); }
         if(shuffleFlash>0) shuffleFlash--;
         if(justPressed['ArrowLeft']||justPressed['KeyA'])  sel=(sel+4)%5;
         if(justPressed['ArrowRight']||justPressed['KeyD']) sel=(sel+1)%5;
@@ -1834,12 +1852,12 @@ function createIceCream(skipIntro=false) {
       }
       // timer de embaralhamento
       if(!revealed){
-        const pct=shuffleT/600;
+        const pct=shuffleT/SHUFFLE_INTERVAL;
         const BAR_MAX=W-130-40; // ends at x=330, before cardápio at W-115=365
         const barW=Math.round(BAR_MAX*(1-pct));
         px(40,72,BAR_MAX,5,'#333');
         px(40,72,barW,5,pct>0.7?C.red:C.gold);
-        const secsLeft=Math.ceil((600-shuffleT)/60);
+        const secsLeft=Math.ceil((SHUFFLE_INTERVAL-shuffleT)/60);
         ctx.fillStyle=pct>0.7?C.red:'#666'; ctx.font='8px "Courier New"'; ctx.textAlign='center';
         ctx.fillText(`sabores embaralham em ${secsLeft}s`,W/2,69); ctx.textAlign='left';
         if(shuffleFlash>0){
@@ -2064,10 +2082,16 @@ function createDailyLife(skipIntro=false) {
         }
         drawChef(px2,H-75,bellaDir===1?-1:1,frame);
         if(bellaState==='blocked'){
-          ctx.fillStyle='rgba(255,255,255,.92)'; ctx.fillRect(bellaX-18,H-114,52,22);
-          ctx.strokeStyle='#333'; ctx.lineWidth=1; ctx.strokeRect(bellaX-18,H-114,52,22);
+          const bubbleW=80, bubbleH=22;
+          const bubbleX=Math.max(8,Math.min(W-bubbleW-8,bellaX-36));
+          const bubbleY=H-116;
+          ctx.fillStyle='rgba(255,255,255,.94)'; ctx.fillRect(bubbleX,bubbleY,bubbleW,bubbleH);
+          ctx.strokeStyle='#333'; ctx.lineWidth=1; ctx.strokeRect(bubbleX,bubbleY,bubbleW,bubbleH);
+          ctx.fillStyle='rgba(255,255,255,.94)';
+          ctx.beginPath(); ctx.moveTo(bubbleX+42,bubbleY+bubbleH); ctx.lineTo(bubbleX+50,bubbleY+bubbleH); ctx.lineTo(Math.max(10,Math.min(W-10,bellaX+4)),H-84); ctx.closePath(); ctx.fill();
+          ctx.strokeStyle='#333'; ctx.beginPath(); ctx.moveTo(bubbleX+42,bubbleY+bubbleH); ctx.lineTo(Math.max(10,Math.min(W-10,bellaX+4)),H-84); ctx.lineTo(bubbleX+50,bubbleY+bubbleH); ctx.stroke();
           ctx.fillStyle=C.black; ctx.font='9px "Courier New"'; ctx.textAlign='center';
-          ctx.fillText('Au au!! *pata*',bellaX+8,H-99); ctx.textAlign='left';
+          ctx.fillText('Au! quase peguei!',bubbleX+bubbleW/2,bubbleY+14); ctx.textAlign='left';
         }
         drawHUD('Boss Bella', `Bloqueios ${blocks}/${BELLA_BLOCKS_TO_WIN}  Pao ${'[ok]'.repeat(bLives)+'[x]'.repeat(3-bLives)}  Vel ${bellaSpeed.toFixed(1)}`, {w:310, color:'#cc8800'});
         drawBottomHint('NAO DEIXA A BELLA COMER O PAO!!', '#cc8800');
