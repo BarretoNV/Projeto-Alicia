@@ -70,7 +70,7 @@ O jogo fica praticamente todo dentro do `<script>` do `index.html`.
 - `createGame(idx, skipIntro)`: roteador das 6 fases.
 - `createFinal()`: cena final.
 - `showDialog()`, `updateDialog()` e `drawDialog()`: sistema de dialogo.
-- `SFX`: efeitos sonoros e musica de fundo usando Web Audio API.
+- `SFX`: efeitos sonoros e temas musicais por fase usando Web Audio API.
 - `drawHUD()` e `drawBottomHint()`: helpers para HUDs padronizados.
 
 Cada cena normalmente retorna um objeto com:
@@ -88,6 +88,7 @@ Os sprites principais sao desenhados via canvas/pixel art. A Harley da tela inic
 - Prefira mudancas localizadas por fase, porque o jogo e um arquivo unico grande.
 - Ao mexer em dialogos, teste `Espaco` e `Enter`.
 - Ao mexer em audio, lembre que o navegador so libera som depois da primeira interacao.
+- Ao mexer em musicas, use `SFX.setMusicTheme(nome)` e mantenha apenas um timer de musica ativo.
 - Ao mexer na tela inicial, preserve `pngharley.png` ou o fallback `drawHarley()`.
 
 ## Arquivos

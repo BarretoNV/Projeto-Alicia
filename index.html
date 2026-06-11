@@ -80,18 +80,68 @@ function clearJP() { for (let k in justPressed) delete justPressed[k]; }
 const SFX = (() => {
   let ac = null, muted = false, unlocked = false, lastBlip = 0;
   let musicGain = null, musicTimer = null, musicStep = 0, musicNextTime = 0;
-  const melody = [
-    392, 494, 523, 494, 440, 392, 330, 392,
-    440, 523, 587, 523, 494, 440, 392, 330,
-  ];
-  const bass = [196, 196, 220, 220, 165, 165, 196, 196];
+  const MUSIC_MASTER_GAIN = 1;
+  const MUSIC_THEMES = {
+    title: {
+      melody:[440,392,370,392, 440,392,330,370, 392,370,330,294, 330,370,392,370],
+      bass:[110,110,110,110, 147,147,147,147, 123,123,123,123, 98,98,98,98],
+      stepDur:.42, noteDur:.34, bassDur:.48, wave:'triangle', vol:.014, bassVol:.014,
+    },
+    map: {
+      melody:[330,392,440,392, 349,392,440,392],
+      bass:[98,98,131,131, 110,110,147,147],
+      stepDur:.5, noteDur:.36, bassDur:.58, wave:'triangle', vol:.012, bassVol:.01,
+    },
+    gym: {
+      melody:[392,440,494,440, 523,494,440,392, 440,494,587,494, 523,494,440,392],
+      bass:[196,196,220,220, 247,247,220,220],
+      stepDur:.25, noteDur:.16, bassDur:.28, wave:'square', vol:.011, bassVol:.012,
+    },
+    hill: {
+      melody:[330,392,440,392, 330,370,392,330, 294,330,392,370, 330,294,262,294],
+      bass:[82,82,98,98, 110,110,98,98],
+      stepDur:.34, noteDur:.24, bassDur:.42, wave:'triangle', vol:.013, bassVol:.012,
+    },
+    cinema: {
+      melody:[220,0,247,0, 262,0,247,0, 196,0,220,0, 185,0,196,0],
+      bass:[55,55,65,65, 49,49,73,73],
+      stepDur:.58, noteDur:.42, bassDur:.7, wave:'sine', vol:.01, bassVol:.014,
+    },
+    beach: {
+      melody:[523,587,659,587, 523,494,523,587, 659,698,659,587, 523,587,523,494],
+      bass:[131,131,147,147, 165,165,147,147],
+      stepDur:.28, noteDur:.2, bassDur:.34, wave:'triangle', vol:.013, bassVol:.011,
+    },
+    icecream: {
+      melody:[659,587,523,587, 659,784,659,587, 523,587,659,587, 523,494,523,587],
+      bass:[165,165,196,196, 147,147,196,196],
+      stepDur:.3, noteDur:.2, bassDur:.36, wave:'triangle', vol:.012, bassVol:.01,
+    },
+    daily: {
+      melody:[294,330,392,330, 294,330,370,330, 262,294,330,294, 247,294,330,294],
+      bass:[98,98,110,110, 87,87,98,98],
+      stepDur:.46, noteDur:.34, bassDur:.54, wave:'triangle', vol:.011, bassVol:.011,
+    },
+    boss: {
+      melody:[220,247,220,196, 220,262,220,196, 247,294,247,220, 196,220,196,165],
+      bass:[55,55,65,65, 73,73,65,65],
+      stepDur:.2, noteDur:.14, bassDur:.24, wave:'sawtooth', vol:.011, bassVol:.017,
+    },
+    final: {
+      melody:[392,440,494,523, 494,440,392,330, 349,392,440,494, 440,392,330,392],
+      bass:[98,98,123,123, 131,131,147,147],
+      stepDur:.44, noteDur:.34, bassDur:.52, wave:'triangle', vol:.013, bassVol:.012,
+    },
+  };
+  let currentThemeName = 'title';
+  let currentTheme = MUSIC_THEMES.title;
   function ensure() {
     if (!ac) {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return null;
       ac = new AudioCtx();
       musicGain = ac.createGain();
-      musicGain.gain.value = 1;
+      musicGain.gain.value = MUSIC_MASTER_GAIN;
       musicGain.connect(ac.destination);
     }
     return ac;
@@ -130,11 +180,16 @@ const SFX = (() => {
   function scheduleMusic() {
     if (!ac || !unlocked) return;
     while (musicNextTime < ac.currentTime + 0.8) {
-      const step = musicStep % melody.length;
-      musicTone(melody[step], musicNextTime, 0.22, 'triangle', 0.016);
-      if (step % 2 === 0) musicTone(bass[Math.floor(step/2)%bass.length], musicNextTime, 0.34, 'sine', 0.012);
+      const theme = currentTheme;
+      const step = musicStep % theme.melody.length;
+      const note = theme.melody[step];
+      if (note) musicTone(note, musicNextTime, theme.noteDur, theme.wave, theme.vol);
+      if (step % 2 === 0) {
+        const b = theme.bass[Math.floor(step/2)%theme.bass.length];
+        if (b) musicTone(b, musicNextTime, theme.bassDur, 'sine', theme.bassVol);
+      }
       musicStep++;
-      musicNextTime += 0.32;
+      musicNextTime += theme.stepDur;
     }
   }
   function startMusic() {
@@ -151,10 +206,20 @@ const SFX = (() => {
   }
   return {
     unlock,
+    setMusicTheme(name){
+      const next = MUSIC_THEMES[name] || MUSIC_THEMES.title;
+      if (name === currentThemeName && next === currentTheme) return;
+      currentThemeName = MUSIC_THEMES[name] ? name : 'title';
+      currentTheme = next;
+      musicStep = 0;
+      if (ac) musicNextTime = ac.currentTime + 0.06;
+      if (unlocked) startMusic();
+    },
     toggleMute(){
       muted = !muted;
-      if (musicGain) musicGain.gain.setTargetAtTime(muted ? 0 : 0.035, ac.currentTime, 0.03);
+      if (musicGain) musicGain.gain.setTargetAtTime(muted ? 0 : MUSIC_MASTER_GAIN, ac.currentTime, 0.03);
       if (!muted) {
+        if (ac) musicNextTime = ac.currentTime + 0.06;
         startMusic();
         tone(520, 0.05, 'triangle', 0.03);
       }
@@ -444,6 +509,7 @@ const LOCS = [
   { name:'O Dia a Dia',           sub:'Fase 6 — A Mais Difícil',      color:'#cc8800',icon:'6', memory:'O cotidiano: livros, pão, Bella e amor prático.' },
 ];
 function createLocCard(idx) {
+  SFX.setMusicTheme('map');
   let t=0;
   let advancing=false;
   const loc=LOCS[idx];
@@ -512,6 +578,7 @@ function createLocCard(idx) {
 
 // ─── TITLE ───────────────────────────────────────────────────
 function createTitle() {
+  SFX.setMusicTheme('title');
   let t=0;
   const clouds=[{x:30,y:36,w:60},{x:190,y:22,w:80},{x:360,y:44,w:55}];
 
@@ -695,6 +762,7 @@ function createGame(idx, skipIntro=false){
 // FASE 1 — FLA FIT (Simon Says)
 // ═══════════════════════════════════════════════════════════════
 function createGym(skipIntro=false) {
+  SFX.setMusicTheme('gym');
   let phase='dialog', seq=[], input=[], showIdx=-1, showT=0, round=0, maxRound=3;
   let inputIdx=0, flashKey=null, flashT=0, errFlash=false, errT=0, succT=0, t=0, frame=0;
   const DIRS=['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'];
@@ -939,6 +1007,7 @@ function createGym(skipIntro=false) {
 // FASE 2 — MORRO DO RATO (Plataforma)
 // ═══════════════════════════════════════════════════════════════
 function createHill(skipIntro=false) {
+  SFX.setMusicTheme('hill');
   let phase='dialog', t=0, frame=0, dir=1;
   let px2=40, py2=H-50, vy=0, onGround=false;
   let collected=0, won=false, wonT=0;
@@ -1133,12 +1202,13 @@ function createHill(skipIntro=false) {
 // FASE 3 — CINEMA (Quiz fofo)
 // ═══════════════════════════════════════════════════════════════
 function createCinema(skipIntro=false) {
+  SFX.setMusicTheme('cinema');
   let phase='dialog', t=0, sel=0, answered=false, ansT=0, qi=0;
   let wrongAns=false, wrongT=0;
   const QS=[
     {
       q:'Como você se sentiu sentado ao lado dela no cinema?',
-      opts:['Calor, porque estava bêbado','Que era um sonho bom demais','Borboletas no estômago','As três ao mesmo tempo'],
+      opts:['Calor (tinha bebido)','Que era um sonho bom demais','Borboletas no estômago','As três ao mesmo tempo'],
       resp:['Havia algo mais do que calor...','Era real, mas havia mais...','Quase! Pensa um pouco mais...','Exatamente isso — e ela sentiu o mesmo.'],
       correct:3,
     },
@@ -1150,20 +1220,20 @@ function createCinema(skipIntro=false) {
     },
     {
       q:'Qual o gênero de filme favorito dela?',
-      opts:['Ação','Comédia','Documentário','Romance'],
-      resp:['Ação tem adrenalina, mas ela prefere outro...','Comédia faz rir, mas Romance faz sentir.','Pensa melhor...','Romance! O coração dela sabe o que quer.'],
+      opts:['Ação','Comédia','Suspense','Romance'],
+      resp:['Ação tem adrenalina, mas ela prefere outro...','Comédia faz rir, mas Romance faz sentir.','Suspense chega perto, mas o coração dela prefere Romance.','Romance! O coração dela sabe o que quer.'],
       correct:3,
     },
     {
       q:'Qual o diretor favorito dela?',
-      opts:['Quentin Tarantino','Tim Burton','Steven Spielberg','Alfred Hitchcock'],
-      resp:['Tarantino é intenso, mas não é ele...','Burton é sombrio, mas não é ele.','Spielberg é genial, mas ela tem outro favorito.','Hitchcock! O mestre do suspense — igual ela.'],
+      opts:['Quentin Tarantino','Tim Burton','Scorsese','Alfred Hitchcock'],
+      resp:['Tarantino é intenso, mas não é ele...','Burton é sombrio, mas não é ele.','Scorsese é gigante, mas ela tem outro favorito.','Hitchcock! O mestre do suspense — igual ela.'],
       correct:3,
     },
     {
       q:'Qual o filme favorito dela que vocês assistiram juntos?',
-      opts:['Nosferatu','It','Psicose','Drácula'],
-      resp:['Nosferatu foi inesquecível, mas não é o favorito...','It dá medo, mas não foi esse.','Psicose! O favorito dela — e assistiram juntos.','Drácula é clássico, mas não foi esse.'],
+      opts:['Nosferatu','Morro dos Ventos Uivantes','Psicose','Drácula'],
+      resp:['Nosferatu foi inesquecível, mas não é o favorito...','Morro dos Ventos Uivantes combina com ela, mas não foi esse.','Psicose! O favorito dela — e assistiram juntos.','Drácula é clássico, mas não foi esse.'],
       correct:2,
     },
   ];
@@ -1375,6 +1445,7 @@ function createCinema(skipIntro=false) {
 // FASE 4 — PRAIA DE SANTA CLARA (Dodge + Coleta)
 // ═══════════════════════════════════════════════════════════════
 function createBeach(skipIntro=false) {
+  SFX.setMusicTheme('beach');
   let phase='dialog', t=0, frame=0, dir=1;
   let px2=W/2, score=0, lives=3, target=8;
   let waves=[], items=[], wt=0, it=0;
@@ -1643,6 +1714,7 @@ function createBeach(skipIntro=false) {
 // FASE 5 — CALEBITO (Escolha o Nero)
 // ═══════════════════════════════════════════════════════════════
 function createIceCream(skipIntro=false) {
+  SFX.setMusicTheme('icecream');
   let phase='dialog', t=0, sel=0, revealed=false, revT=0;
   let shuffleT=0, shuffleFlash=0;
   const SHUFFLE_INTERVAL = 180;
@@ -1887,6 +1959,7 @@ function createIceCream(skipIntro=false) {
 // FASE 6 — O DIA A DIA (Livros + Boss Bella)
 // ═══════════════════════════════════════════════════════════════
 function createDailyLife(skipIntro=false) {
+  SFX.setMusicTheme('daily');
   let phase='dialog', t=0, frame=0;
 
   // ── Puzzle dos livros ──
@@ -2123,7 +2196,7 @@ function createDailyLife(skipIntro=false) {
                 '"Você a conhece de verdade."',
                 'Prova 1 superada! Agora... o Boss Final.',
                 'Bella vem dos dois lados. Bloqueie 10 vezes!',
-              ], ()=>{ phase='boss'; spawnBella(); });
+              ], ()=>{ SFX.setMusicTheme('boss'); phase='boss'; spawnBella(); });
             }
           } else { SFX.error(); wrongFlash=true; wrongT=36; wrongShake=28; picks=[]; }
         }
@@ -2135,6 +2208,7 @@ function createDailyLife(skipIntro=false) {
 // FINAL SCENE
 // ═══════════════════════════════════════════════════════════════
 function createFinal(skipIntro=false) {
+  SFX.setMusicTheme('final');
   let t=0, phase='dialog', msgAlpha=0, surpriseAlpha=0;
   if(skipIntro) {
     phase='message'; msgAlpha=1;
