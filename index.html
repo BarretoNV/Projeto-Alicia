@@ -2209,7 +2209,7 @@ function createDailyLife(skipIntro=false) {
 // ═══════════════════════════════════════════════════════════════
 function createFinal(skipIntro=false) {
   SFX.setMusicTheme('final');
-  let t=0, phase='dialog', msgAlpha=0, surpriseAlpha=0;
+  let t=0, phase='dialog', msgAlpha=0;
   if(skipIntro) {
     phase='message'; msgAlpha=1;
   } else {
@@ -2234,20 +2234,11 @@ function createFinal(skipIntro=false) {
     '— Mrs. Puff  ♥',
   ];
 
-  // ══ EDITE AQUI as linhas da surpresa real ══
-  const SURPRISE=[
-    'Me envie uma mensagem',
-    'e saiba onde estou',
-    'te esperando...',
-  ];
-  // ═══════════════════════════════════════════
-
   return {
     update(){
       t++; if(t%18===0) spawnHeart();
       if(phase==='dialog') updateDialog();
       if(phase==='message') msgAlpha=Math.min(1,msgAlpha+.018);
-      if(phase==='surprise') surpriseAlpha=Math.min(1,surpriseAlpha+.025);
       updateFHearts();
     },
     draw(){
@@ -2292,37 +2283,11 @@ function createFinal(skipIntro=false) {
           ctx.fillText(MSG[i],W/2,32+i*17);
         }
         ctx.restore();
-        if(msgAlpha>=1&&phase==='message'&&Math.floor(t/30)%2===0){
-          ctx.fillStyle=C.pink; ctx.font='10px "Courier New"'; ctx.textAlign='center';
-          ctx.fillText('[ ESPAÇO — ver a surpresa ]',W/2,H-52);
-        }
-        ctx.textAlign='left';
-      }
-      // surprise reveal
-      if(surpriseAlpha>0){
-        ctx.save(); ctx.globalAlpha=surpriseAlpha;
-        ctx.fillStyle='rgba(8,4,24,.97)'; ctx.fillRect(18,H/2-68,W-36,136);
-        ctx.strokeStyle=C.gold; ctx.lineWidth=2; ctx.strokeRect(18,H/2-68,W-36,136);
-        ctx.textAlign='center';
-        ctx.fillStyle=C.gold; ctx.font='bold 13px "Courier New"';
-        ctx.fillText('✨  SUA SURPRESA  ✨',W/2,H/2-46);
-        ctx.fillStyle=C.white; ctx.font='11px "Courier New"';
-        for(let i=0;i<SURPRISE.length;i++){
-          if(!SURPRISE[i]) continue;
-          ctx.fillText(SURPRISE[i],W/2,H/2-22+i*19);
-        }
-        ctx.fillStyle=C.pink2; ctx.font='italic 10px "Courier New"';
-        ctx.fillText('— com amor, Mrs. Puff  ♥',W/2,H/2+58);
-        ctx.restore();
         ctx.textAlign='left';
       }
       drawDialog();
     },
-    onKey(code){
-      if(phase==='message'&&msgAlpha>=1&&(code==='Space'||code==='Enter')){
-        phase='surprise'; for(let i=0;i<12;i++) spawnHeart();
-      }
-    }
+    onKey(){}
   };
 }
 
